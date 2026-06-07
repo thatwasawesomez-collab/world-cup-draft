@@ -32,8 +32,8 @@ export const DraftRoom = () => {
 
   const groups = Array.from(new Set(TEAMS.map((t) => t.group))).sort();
   const displayTeams = selectedGroup === 'All'
-    ? TEAMS
-    : TEAMS.filter((t) => t.group === selectedGroup);
+    ? availableTeams
+    : availableTeams.filter((t) => t.group === selectedGroup);
 
   const rankedTeams = [...TEAMS].sort((a, b) => a.fifaRanking - b.fifaRanking);
 
@@ -247,13 +247,13 @@ export const DraftRoom = () => {
                   <button
                     key={team.id}
                     onClick={() => handlePick(team.id)}
-                    disabled={isDrafted || isDraftComplete || picking}
+                    disabled={isDrafted || isDraftComplete || (picking && pickingTeamId !== team.id) || !isMyTurn}
                     className={twMerge(
                       "relative rounded-lg overflow-hidden h-24 border-2 transition-colors group flex flex-col items-center justify-center p-2",
                       isDrafted
                         ? "border-neutral-800 bg-neutral-900 opacity-60 cursor-not-allowed"
                         : !isMyTurn
-                          ? "border-neutral-800 bg-neutral-950 opacity-50 pointer-events-none"
+                          ? "border-neutral-800 bg-neutral-950 opacity-50"
                           : "border-neutral-800 bg-neutral-950 hover:border-emerald-500 hover:shadow-[0_0_15px_-5px_rgba(16,185,129,0.3)] cursor-pointer"
                     )}
                   >
