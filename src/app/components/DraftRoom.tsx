@@ -1,17 +1,27 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { TEAMS } from '../store';
 import { useDraft } from '../../hooks/useDraft';
 import { fetchLeague } from '../../hooks/useLeague';
 import type { DraftType, League } from '../../types/index';
-import { Clock, Users, Trophy, CheckCircle2, Loader2 } from 'lucide-react';
+import { Clock, Users, Trophy, Loader2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import confetti from 'canvas-confetti';
 
 export const DraftRoom = () => {
   const { id: leagueId } = useParams();
   const navigate = useNavigate();
-  const { draftState, picks, members, isMyTurn, makePick, loading, error } = useDraft(leagueId ?? '');
+  const {
+    draftState,
+    picks,
+    members,
+    isMyTurn,
+    makePick,
+    autoDraftTimeoutPick,
+    refreshDraft,
+    loading,
+    error,
+  } = useDraft(leagueId ?? '');
 
   const [league, setLeague] = useState<League | null>(null);
   const [draftType, setDraftType] = useState<DraftType>('untimed');
@@ -20,6 +30,7 @@ export const DraftRoom = () => {
   const [picking, setPicking] = useState(false);
   const [pickingTeamId, setPickingTeamId] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
+  const autoPickAttemptedRef = useRef<number | null>(null);
 
   const TOTAL_PICKS = 48;
   const memberCount = members.length;
@@ -32,8 +43,11 @@ export const DraftRoom = () => {
 
   const groups = Array.from(new Set(TEAMS.map((t) => t.group))).sort();
   const displayTeams = selectedGroup === 'All'
-    ? availableTeams
-    : availableTeams.filter((t) => t.group === selectedGroup);
+    ? TEAMS
+    : TEAMS.filter((t) => t.group === selectedGroup);
+
+  const availableInGroup = (group: string) =>
+    TEAMS.filter((t) => t.group === group && !pickedTeamIds.has(t.id)).length;
 
   const rankedTeams = [...TEAMS].sort((a, b) => a.fifaRanking - b.fifaRanking);
 
@@ -71,21 +85,23 @@ export const DraftRoom = () => {
     try {
       await makePick(teamId);
     } catch (err) {
+      autoPickAttemptedRef.current = null;
       setPickError(err instanceof Error ? err.message : 'Failed to make pick');
-      if (draftType !== 'untimed') {
-        setTimeLeft(draftType === '2min' ? 120 : 300);
-      }
+      refreshDraft();
     } finally {
       setPicking(false);
       setPickingTeamId(null);
     }
-  }, [isMyTurn, picking, isDraftComplete, makePick, pickedTeamIds, draftType]);
+  }, [isMyTurn, picking, isDraftComplete, makePick, pickedTeamIds, refreshDraft]);
+
+  useEffect(() => {
+    autoPickAttemptedRef.current = null;
+  }, [draftState?.current_pick]);
 
   useEffect(() => {
     if (
       draftType === 'untimed' ||
       isDraftComplete ||
-      !isMyTurn ||
       picking ||
       timeLeft > 0 ||
       availableTeams.length === 0
@@ -93,9 +109,42 @@ export const DraftRoom = () => {
       return;
     }
 
+    const currentPick = draftState?.current_pick;
+    if (!currentPick || autoPickAttemptedRef.current === currentPick) {
+      return;
+    }
+
     const randomTeam = availableTeams[Math.floor(Math.random() * availableTeams.length)];
-    handlePick(randomTeam.id);
-  }, [timeLeft, isMyTurn, picking, isDraftComplete, draftType, availableTeams, handlePick]);
+    autoPickAttemptedRef.current = currentPick;
+
+    const runTimeoutPick = async () => {
+      setPicking(true);
+      setPickError(null);
+      try {
+        await autoDraftTimeoutPick(randomTeam.id);
+      } catch (err) {
+        autoPickAttemptedRef.current = null;
+        const message = err instanceof Error ? err.message : 'Failed to auto-draft';
+        if (!message.toLowerCase().includes('already')) {
+          setPickError(message);
+        }
+        refreshDraft();
+      } finally {
+        setPicking(false);
+      }
+    };
+
+    runTimeoutPick();
+  }, [
+    timeLeft,
+    picking,
+    isDraftComplete,
+    draftType,
+    availableTeams,
+    draftState?.current_pick,
+    autoDraftTimeoutPick,
+    refreshDraft,
+  ]);
 
   useEffect(() => {
     if (isDraftComplete) {
@@ -219,7 +268,7 @@ export const DraftRoom = () => {
                   : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200"
               )}
             >
-              All
+              All ({availableTeams.length}/{TEAMS.length})
             </button>
             {groups.map(g => (
               <button
@@ -232,7 +281,7 @@ export const DraftRoom = () => {
                     : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200"
                 )}
               >
-                Group {g}
+                Group {g} ({availableInGroup(g)}/4)
               </button>
             ))}
           </div>
@@ -247,13 +296,13 @@ export const DraftRoom = () => {
                   <button
                     key={team.id}
                     onClick={() => handlePick(team.id)}
-                    disabled={isDrafted || isDraftComplete || picking}
+                    disabled={isDrafted || isDraftComplete || picking || !isMyTurn}
                     className={twMerge(
                       "relative rounded-lg overflow-hidden h-24 border-2 transition-colors group flex flex-col items-center justify-center p-2",
                       isDrafted
-                        ? "border-neutral-800 bg-neutral-900 opacity-60 cursor-not-allowed"
+                        ? "border-neutral-700 bg-neutral-900 cursor-not-allowed"
                         : !isMyTurn
-                          ? "border-neutral-800 bg-neutral-950 opacity-50"
+                          ? "border-neutral-800 bg-neutral-950 opacity-70 cursor-not-allowed"
                           : "border-neutral-800 bg-neutral-950 hover:border-emerald-500 hover:shadow-[0_0_15px_-5px_rgba(16,185,129,0.3)] cursor-pointer"
                     )}
                   >
@@ -261,12 +310,23 @@ export const DraftRoom = () => {
                       <img
                         src={`https://flagcdn.com/w320/${team.flagCode}.png`}
                         alt={`${team.name} flag`}
-                        className="object-cover w-full h-full opacity-40 group-hover:opacity-50 transition-opacity duration-300"
+                        className={twMerge(
+                          "object-cover w-full h-full transition-all duration-300",
+                          isDrafted
+                            ? "opacity-20 grayscale"
+                            : "opacity-40 group-hover:opacity-50",
+                        )}
                       />
-                      <div className="absolute inset-0 bg-neutral-950/60" />
+                      <div className={twMerge(
+                        "absolute inset-0",
+                        isDrafted ? "bg-neutral-950/85" : "bg-neutral-950/60",
+                      )} />
                     </div>
 
-                    <div className="relative z-10 flex flex-col items-center justify-center text-center w-full px-2">
+                    <div className={twMerge(
+                      "relative z-10 flex flex-col items-center justify-center text-center w-full px-2 transition-opacity",
+                      isDrafted && "opacity-40",
+                    )}>
                       <span className="text-[10px] text-emerald-400 font-bold tracking-widest uppercase mb-1">Group {team.group}</span>
                       <span className="font-bold text-base whitespace-nowrap overflow-hidden text-ellipsis w-full drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{team.name}</span>
                     </div>
@@ -278,15 +338,17 @@ export const DraftRoom = () => {
                     )}
 
                     {isDrafted && draftedBy && (
-                      <div className="absolute inset-0 bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-2 z-20 gap-3">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 hidden md:block" />
-                        <div className={twMerge("w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-md shrink-0", draftedBy.color)}>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2 z-20 gap-1">
+                        <div className={twMerge(
+                          "w-10 h-10 rounded-full flex items-center justify-center text-white text-base font-bold shadow-lg ring-2 ring-neutral-950",
+                          draftedBy.color,
+                        )}>
                           {draftedBy.username.charAt(0).toUpperCase()}
                         </div>
-                        <div className="flex flex-col items-start overflow-hidden w-full text-left">
-                           <span className="text-xs font-bold truncate w-full">{draftedBy.username}</span>
-                           <span className="text-[10px] text-emerald-500">Pick #{pick.pickNumber}</span>
-                        </div>
+                        <span className="text-[10px] font-bold text-neutral-300 truncate max-w-full px-1">
+                          {draftedBy.username}
+                        </span>
+                        <span className="text-[9px] text-neutral-500">#{pick.pickNumber}</span>
                       </div>
                     )}
                   </button>
