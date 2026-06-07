@@ -82,13 +82,6 @@ function findMemberForTeam(
   return pick ? members.find((m) => m.user_id === pick.playerId) : undefined;
 }
 
-function findTeamFromMatchCode(code: string) {
-  const lower = code.toLowerCase();
-  return TEAMS.find(
-    (t) => t.id.toLowerCase() === lower || t.name.toLowerCase() === lower,
-  );
-}
-
 function getInitialScheduleDateKey() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -135,6 +128,21 @@ function findCinderellaWinner(
 
   return { team: worstTeam, member };
 }
+
+const TLA_TO_TEAM: Record<string, string> = {
+  MEX: 'mx', RSA: 'za', KOR: 'kr', CZE: 'cz',
+  CAN: 'ca', BIH: 'ba', QAT: 'qa', SUI: 'ch',
+  BRA: 'br', MAR: 'ma', HAI: 'ht', SCO: 'gb-sct',
+  USA: 'us', PAR: 'py', AUS: 'au', TUR: 'tr',
+  GER: 'de', CUW: 'cw', CIV: 'ci', ECU: 'ec',
+  NED: 'nl', JPN: 'jp', SWE: 'se', TUN: 'tn',
+  BEL: 'be', EGY: 'eg', IRN: 'ir', NZL: 'nz',
+  ESP: 'es', CPV: 'cv', KSA: 'sa', URU: 'uy',
+  FRA: 'fr', SEN: 'sn', IRQ: 'iq', NOR: 'no',
+  ARG: 'ar', ALG: 'dz', AUT: 'at', JOR: 'jo',
+  POR: 'pt', COD: 'cd', UZB: 'uz', COL: 'co',
+  ENG: 'gb-eng', CRO: 'hr', GHA: 'gh', PAN: 'pa',
+};
 
 export const LeagueDashboard = () => {
   const { id } = useParams();
@@ -309,7 +317,11 @@ export const LeagueDashboard = () => {
         if (!team) return null;
 
         const teamMatches = scheduleMatches
-          .filter((m) => m.home_team === team.id || m.away_team === team.id)
+          .filter((m) => {
+            const homeFlagCode = TLA_TO_TEAM[m.home_team] ?? m.home_team.toLowerCase();
+            const awayFlagCode = TLA_TO_TEAM[m.away_team] ?? m.away_team.toLowerCase();
+            return homeFlagCode === team.id || awayFlagCode === team.id;
+          })
           .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
 
         return { team, matches: teamMatches };
@@ -679,10 +691,12 @@ export const LeagueDashboard = () => {
                     ) : (
                       <div className="divide-y divide-neutral-800">
                         {matchesOnSelectedDate.map((match) => {
-                          const homeTeam = findTeamFromMatchCode(match.home_team);
-                          const awayTeam = findTeamFromMatchCode(match.away_team);
-                          const homeMember = findMemberForTeam(match.home_team, schedulePicks, scheduleMembers);
-                          const awayMember = findMemberForTeam(match.away_team, schedulePicks, scheduleMembers);
+                          const homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
+                          const awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                          const homeTeam = TEAMS.find((t) => t.id === homeFlagCode);
+                          const awayTeam = TEAMS.find((t) => t.id === awayFlagCode);
+                          const homeMember = findMemberForTeam(homeFlagCode, schedulePicks, scheduleMembers);
+                          const awayMember = findMemberForTeam(awayFlagCode, schedulePicks, scheduleMembers);
                           const isRivalry = !!(
                             homeMember &&
                             awayMember &&
@@ -692,16 +706,14 @@ export const LeagueDashboard = () => {
                           return (
                             <div key={match.id} className="bg-neutral-950 px-5 py-4 flex items-center gap-4">
                               <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
-                                {homeTeam && (
-                                  <>
-                                    <span className="font-bold truncate text-right">{homeTeam.name}</span>
-                                    <img
-                                      src={`https://flagcdn.com/w40/${homeTeam.flagCode}.png`}
-                                      alt=""
-                                      className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                    />
-                                  </>
-                                )}
+                                <>
+                                  <span className="font-bold truncate text-right">{homeTeam?.name ?? match.home_team}</span>
+                                  <img
+                                    src={`https://flagcdn.com/w40/${homeFlagCode}.png`}
+                                    alt=""
+                                    className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
+                                  />
+                                </>
                                 {homeMember && (
                                   <div className={twMerge(
                                     'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
@@ -740,16 +752,14 @@ export const LeagueDashboard = () => {
                                     {awayMember.username.charAt(0).toUpperCase()}
                                   </div>
                                 )}
-                                {awayTeam && (
-                                  <>
-                                    <img
-                                      src={`https://flagcdn.com/w40/${awayTeam.flagCode}.png`}
-                                      alt=""
-                                      className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                    />
-                                    <span className="font-bold truncate">{awayTeam.name}</span>
-                                  </>
-                                )}
+                                <>
+                                  <img
+                                    src={`https://flagcdn.com/w40/${awayFlagCode}.png`}
+                                    alt=""
+                                    className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
+                                  />
+                                  <span className="font-bold truncate">{awayTeam?.name ?? match.away_team}</span>
+                                </>
                               </div>
                             </div>
                           );
@@ -790,9 +800,12 @@ export const LeagueDashboard = () => {
 
                         <div className="space-y-3">
                           {teamMatches.map((match) => {
-                            const isHome = match.home_team === team.id;
-                            const opponentCode = isHome ? match.away_team : match.home_team;
-                            const opponent = findTeamFromMatchCode(opponentCode);
+                            const homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
+                            const awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                            const isHome = homeFlagCode === team.id;
+                            const opponentFlagCode = isHome ? awayFlagCode : homeFlagCode;
+                            const opponentTla = isHome ? match.away_team : match.home_team;
+                            const opponent = TEAMS.find((t) => t.id === opponentFlagCode);
                             const { dateStr } = formatMatchDate(match.match_date);
 
                             return (
@@ -807,12 +820,10 @@ export const LeagueDashboard = () => {
                                     <span>{formatMatchTime(match.match_date)}</span>
                                   )}
                                 </div>
-                                {opponent && (
-                                  <div className="flex items-center justify-end gap-2">
-                                    <span className="font-bold">vs {opponent.name}</span>
-                                    <img src={`https://flagcdn.com/w20/${opponent.flagCode}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" />
-                                  </div>
-                                )}
+                                <div className="flex items-center justify-end gap-2">
+                                  <span className="font-bold">vs {opponent?.name ?? opponentTla}</span>
+                                  <img src={`https://flagcdn.com/w20/${opponentFlagCode}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" />
+                                </div>
                               </div>
                             );
                           })}
