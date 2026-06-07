@@ -82,6 +82,28 @@ function findMemberForTeam(
   return pick ? members.find((m) => m.user_id === pick.playerId) : undefined;
 }
 
+function findTeamFromMatchCode(code: string) {
+  const lower = code.toLowerCase();
+  return TEAMS.find(
+    (t) => t.id.toLowerCase() === lower || t.name.toLowerCase() === lower,
+  );
+}
+
+function getInitialScheduleDateKey() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tournamentStart = new Date('2026-06-11');
+  tournamentStart.setHours(0, 0, 0, 0);
+  const date = today < tournamentStart ? tournamentStart : today;
+  return date.toLocaleDateString('en-CA');
+}
+
+function getWeekStartForDateKey(dateKey: string) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function findCinderellaWinner(
   round: string,
   allMatches: Match[],
@@ -137,12 +159,12 @@ export const LeagueDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'standings' | 'roster' | 'schedule'>('standings');
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
-  const [scheduleWeekStart, setScheduleWeekStart] = useState(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return today;
-  });
-  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState('');
+  const [scheduleWeekStart, setScheduleWeekStart] = useState(() =>
+    getWeekStartForDateKey(getInitialScheduleDateKey()),
+  );
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState(getInitialScheduleDateKey);
+  const [countdownNow, setCountdownNow] = useState(Date.now());
 
   const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -191,6 +213,7 @@ export const LeagueDashboard = () => {
         setMatches(finishedMatches);
         setAllMatches(fetchedMatches);
         setScheduledMatches(fetchedMatches.filter((m) => m.status === 'scheduled'));
+        setCurrentUserId(user?.id ?? '');
         setSelectedPlayerId((prev) => prev || user?.id || leagueData.members[0]?.user_id || '');
       } catch (err) {
         if (isMounted) {
@@ -278,7 +301,21 @@ export const LeagueDashboard = () => {
 
   const getLocalDateKey = (date: Date) => date.toLocaleDateString('en-CA');
 
-  const todayKey = getLocalDateKey(new Date());
+  const currentUserTeams = useMemo(() => {
+    const myPicks = schedulePicks.filter((p) => p.playerId === currentUserId);
+    return myPicks
+      .map((pick) => {
+        const team = TEAMS.find((t) => t.id === pick.teamId);
+        if (!team) return null;
+
+        const teamMatches = scheduleMatches
+          .filter((m) => m.home_team === team.id || m.away_team === team.id)
+          .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
+
+        return { team, matches: teamMatches };
+      })
+      .filter(Boolean) as { team: (typeof TEAMS)[number]; matches: Match[] }[];
+  }, [schedulePicks, scheduleMatches, currentUserId]);
 
   const scheduleWeekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
@@ -288,34 +325,34 @@ export const LeagueDashboard = () => {
     });
   }, [scheduleWeekStart]);
 
-  const filteredScheduleMatches = useMemo(() => {
-    const sorted = [...scheduleMatches].sort(
-      (a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime(),
-    );
-
-    if (!selectedScheduleDate) {
-      return sorted;
-    }
-
-    return sorted.filter(
-      (m) => getLocalDateKey(new Date(m.match_date)) === selectedScheduleDate,
-    );
+  const matchesOnSelectedDate = useMemo(() => {
+    return scheduleMatches
+      .filter((m) => getLocalDateKey(new Date(m.match_date)) === selectedScheduleDate)
+      .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
   }, [scheduleMatches, selectedScheduleDate]);
 
-  const groupedScheduleMatches = useMemo(() => {
-    const groups = new Map<string, Match[]>();
+  const tournamentCountdown = useMemo(() => {
+    const target = new Date('2026-06-11T00:00:00').getTime();
+    const diff = Math.max(0, target - countdownNow);
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    return { days, hours, minutes, seconds };
+  }, [countdownNow]);
 
-    for (const match of filteredScheduleMatches) {
-      const key = getLocalDateKey(new Date(match.match_date));
-      const existing = groups.get(key) ?? [];
-      existing.push(match);
-      groups.set(key, existing);
-    }
+  useEffect(() => {
+    if (scheduleMatches.length > 0 || activeTab !== 'schedule') return;
 
-    return Array.from(groups.entries()).sort(
-      ([a], [b]) => new Date(a).getTime() - new Date(b).getTime(),
-    );
-  }, [filteredScheduleMatches]);
+    const interval = setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [scheduleMatches.length, activeTab]);
+
+  const formatSchedulePill = (date: Date) => {
+    const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
+    const rest = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return `${weekday} ${rest}`;
+  };
 
   const formatMatchTime = (isoString: string) =>
     new Date(isoString).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -575,245 +612,207 @@ export const LeagueDashboard = () => {
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                 </div>
+              ) : scheduleMatches.length === 0 ? (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center">
+                  <Calendar className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                  <p className="text-lg text-neutral-300 mb-6">
+                    Match schedule loads when the tournament begins on June 11
+                  </p>
+                  <div className="flex justify-center gap-6 text-emerald-500 font-black text-2xl">
+                    <div><span className="block text-3xl">{tournamentCountdown.days}</span><span className="text-xs text-neutral-500 font-medium">days</span></div>
+                    <div><span className="block text-3xl">{tournamentCountdown.hours}</span><span className="text-xs text-neutral-500 font-medium">hrs</span></div>
+                    <div><span className="block text-3xl">{tournamentCountdown.minutes}</span><span className="text-xs text-neutral-500 font-medium">min</span></div>
+                    <div><span className="block text-3xl">{tournamentCountdown.seconds}</span><span className="text-xs text-neutral-500 font-medium">sec</span></div>
+                  </div>
+                </div>
               ) : (
                 <>
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
-                    <div className="flex items-center border-b border-neutral-800">
-                      <button
-                        onClick={() => {
-                          const prev = new Date(scheduleWeekStart);
-                          prev.setDate(prev.getDate() - 7);
-                          setScheduleWeekStart(prev);
-                        }}
-                        className="p-4 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-                      >
-                        <ChevronLeft className="w-5 h-5" />
-                      </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        const prev = new Date(scheduleWeekStart);
+                        prev.setDate(prev.getDate() - 7);
+                        setScheduleWeekStart(prev);
+                      }}
+                      className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-full transition-colors"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
 
-                      <div className="flex-1 grid grid-cols-7 divide-x divide-neutral-800">
-                        {scheduleWeekDays.map((date) => {
-                          const dateKey = getLocalDateKey(date);
-                          const isToday = dateKey === todayKey;
-                          const isSelected = selectedScheduleDate === dateKey;
-
-                          return (
-                            <button
-                              key={dateKey}
-                              onClick={() => setSelectedScheduleDate(
-                                isSelected ? null : dateKey,
-                              )}
-                              className={twMerge(
-                                'py-4 px-2 flex flex-col items-center gap-1 transition-colors',
-                                isSelected
-                                  ? 'bg-emerald-500/20 text-emerald-500'
-                                  : isToday
-                                    ? 'bg-neutral-800 text-white'
-                                    : 'text-neutral-400 hover:bg-neutral-800 hover:text-white',
-                              )}
-                            >
-                              <span className="text-[10px] font-bold tracking-widest">
-                                {date.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
-                              </span>
-                              <span className="text-lg font-black">{date.getDate()}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          const next = new Date(scheduleWeekStart);
-                          next.setDate(next.getDate() + 7);
-                          setScheduleWeekStart(next);
-                        }}
-                        className="p-4 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-                      >
-                        <ChevronRight className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {groupedScheduleMatches.length === 0 ? (
-                    <p className="text-neutral-500 italic text-center py-12">No matches for this date.</p>
-                  ) : (
-                    <div className="space-y-6">
-                      {groupedScheduleMatches.map(([dateKey, dayMatches]) => {
-                        const { dateStr } = formatMatchDate(dayMatches[0].match_date);
+                    <div className="flex-1 flex gap-2 overflow-x-auto pb-1">
+                      {scheduleWeekDays.map((date) => {
+                        const dateKey = getLocalDateKey(date);
+                        const isSelected = selectedScheduleDate === dateKey;
 
                         return (
-                          <div key={dateKey} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
-                            <div className="px-5 py-3 border-b border-neutral-800 bg-neutral-950">
-                              <h3 className="text-sm font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-2">
-                                <Calendar className="w-4 h-4" /> {dateStr}
-                              </h3>
-                            </div>
-
-                            <div className="divide-y divide-neutral-800">
-                              {dayMatches.map((match) => {
-                                const homeTeam = TEAMS.find((t) => t.id === match.home_team);
-                                const awayTeam = TEAMS.find((t) => t.id === match.away_team);
-                                const homeMember = findMemberForTeam(match.home_team, schedulePicks, scheduleMembers);
-                                const awayMember = findMemberForTeam(match.away_team, schedulePicks, scheduleMembers);
-                                const isRivalry = !!(
-                                  homeMember &&
-                                  awayMember &&
-                                  homeMember.user_id !== awayMember.user_id
-                                );
-
-                                return (
-                                  <div
-                                    key={match.id}
-                                    className={twMerge(
-                                      'bg-neutral-950 px-5 py-4 flex items-center gap-4',
-                                      isRivalry && 'border-l-2 border-l-emerald-500',
-                                    )}
-                                  >
-                                    <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
-                                      {homeTeam && (
-                                        <>
-                                          <span className="font-bold truncate text-right">{homeTeam.name}</span>
-                                          <img
-                                            src={`https://flagcdn.com/w40/${homeTeam.flagCode}.png`}
-                                            alt=""
-                                            className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                          />
-                                        </>
-                                      )}
-                                      {homeMember && (
-                                        <div className={twMerge(
-                                          'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
-                                          homeMember.color,
-                                        )}>
-                                          {homeMember.username.charAt(0).toUpperCase()}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    <div className="w-28 flex flex-col items-center justify-center shrink-0">
-                                      {match.status === 'finished' && match.home_score !== null && match.away_score !== null ? (
-                                        <span className="text-lg font-black text-white">
-                                          {match.home_score} - {match.away_score}
-                                        </span>
-                                      ) : match.status === 'live' ? (
-                                        <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
-                                          LIVE
-                                        </span>
-                                      ) : (
-                                        <span className="text-sm font-semibold text-neutral-400">
-                                          {formatMatchTime(match.match_date)}
-                                        </span>
-                                      )}
-                                      {isRivalry && (
-                                        <span className="text-[10px] text-emerald-500 font-bold mt-1">⚔ Rivalry</span>
-                                      )}
-                                    </div>
-
-                                    <div className="flex-1 flex items-center gap-2 min-w-0">
-                                      {awayMember && (
-                                        <div className={twMerge(
-                                          'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
-                                          awayMember.color,
-                                        )}>
-                                          {awayMember.username.charAt(0).toUpperCase()}
-                                        </div>
-                                      )}
-                                      {awayTeam && (
-                                        <>
-                                          <img
-                                            src={`https://flagcdn.com/w40/${awayTeam.flagCode}.png`}
-                                            alt=""
-                                            className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                          />
-                                          <span className="font-bold truncate">{awayTeam.name}</span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
+                          <button
+                            key={dateKey}
+                            onClick={() => setSelectedScheduleDate(dateKey)}
+                            className={twMerge(
+                              'px-4 py-2 rounded-full font-bold text-sm whitespace-nowrap transition-colors border',
+                              isSelected
+                                ? 'bg-emerald-500 border-emerald-500 text-neutral-950'
+                                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700',
+                            )}
+                          >
+                            {formatSchedulePill(date)}
+                          </button>
                         );
                       })}
                     </div>
-                  )}
+
+                    <button
+                      onClick={() => {
+                        const next = new Date(scheduleWeekStart);
+                        next.setDate(next.getDate() + 7);
+                        setScheduleWeekStart(next);
+                      }}
+                      className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-full transition-colors"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                    {matchesOnSelectedDate.length === 0 ? (
+                      <p className="text-neutral-500 italic text-center py-12">No matches on this date</p>
+                    ) : (
+                      <div className="divide-y divide-neutral-800">
+                        {matchesOnSelectedDate.map((match) => {
+                          const homeTeam = findTeamFromMatchCode(match.home_team);
+                          const awayTeam = findTeamFromMatchCode(match.away_team);
+                          const homeMember = findMemberForTeam(match.home_team, schedulePicks, scheduleMembers);
+                          const awayMember = findMemberForTeam(match.away_team, schedulePicks, scheduleMembers);
+                          const isRivalry = !!(
+                            homeMember &&
+                            awayMember &&
+                            homeMember.user_id !== awayMember.user_id
+                          );
+
+                          return (
+                            <div key={match.id} className="bg-neutral-950 px-5 py-4 flex items-center gap-4">
+                              <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                                {homeTeam && (
+                                  <>
+                                    <span className="font-bold truncate text-right">{homeTeam.name}</span>
+                                    <img
+                                      src={`https://flagcdn.com/w40/${homeTeam.flagCode}.png`}
+                                      alt=""
+                                      className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
+                                    />
+                                  </>
+                                )}
+                                {homeMember && (
+                                  <div className={twMerge(
+                                    'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
+                                    homeMember.color,
+                                  )}>
+                                    {homeMember.username.charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="w-24 flex flex-col items-center justify-center shrink-0">
+                                {match.status === 'finished' && match.home_score !== null && match.away_score !== null ? (
+                                  <span className="text-lg font-black text-white">
+                                    {match.home_score} - {match.away_score}
+                                  </span>
+                                ) : match.status === 'live' ? (
+                                  <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
+                                    LIVE
+                                  </span>
+                                ) : (
+                                  <span className="text-sm font-semibold text-neutral-400">
+                                    {formatMatchTime(match.match_date)}
+                                  </span>
+                                )}
+                                {isRivalry && (
+                                  <span className="text-neutral-500 text-xs mt-1">⚔</span>
+                                )}
+                              </div>
+
+                              <div className="flex-1 flex items-center gap-2 min-w-0">
+                                {awayMember && (
+                                  <div className={twMerge(
+                                    'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
+                                    awayMember.color,
+                                  )}>
+                                    {awayMember.username.charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                                {awayTeam && (
+                                  <>
+                                    <img
+                                      src={`https://flagcdn.com/w40/${awayTeam.flagCode}.png`}
+                                      alt=""
+                                      className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
+                                    />
+                                    <span className="font-bold truncate">{awayTeam.name}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
           )}
 
-          {activeTab === 'roster' && selectedPlayerStats && (
+          {activeTab === 'roster' && (
             <div className="space-y-6">
-              {/* Roster Selector */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-neutral-900 border border-neutral-800 p-4 rounded-xl">
-                <div className="flex items-center gap-3">
-                  <span className="text-neutral-400 font-medium">Viewing Team:</span>
-                  <select 
-                    value={selectedPlayerId}
-                    onChange={(e) => setSelectedPlayerId(e.target.value)}
-                    className="bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 font-bold focus:border-emerald-500 outline-none"
-                  >
-                    {members.map(m => (
-                      <option key={m.user_id} value={m.user_id}>{m.username}'s Roster</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="text-sm text-neutral-400 flex items-center gap-2">
-                  <Clock className="w-4 h-4" /> Times shown in <span className="text-emerald-500 font-medium">{localTimeZone}</span>
-                </div>
+              <div className="text-sm text-neutral-400 flex items-center gap-2">
+                <Clock className="w-4 h-4" /> Times shown in <span className="text-emerald-500 font-medium">{localTimeZone}</span>
               </div>
 
-              {/* Roster Grid */}
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {selectedPlayerStats.teams.map(team => {
-                  const teamMatches = scheduledMatches
-                    .filter(m => m.home_team === team.id || m.away_team === team.id)
-                    .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
-
-                  const teamPoints = getTeamPoints(team.id, matches);
-
-                  return (
+              {scheduleMatches.length === 0 ? (
+                <p className="text-neutral-500 italic text-center py-12">No matches scheduled yet</p>
+              ) : currentUserTeams.length === 0 ? (
+                <p className="text-neutral-500 italic text-center py-12">No drafted teams found.</p>
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {currentUserTeams.map(({ team, matches: teamMatches }) => (
                     <div key={team.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex flex-col">
-                      <div className="p-4 border-b border-neutral-800 relative bg-neutral-950">
-                        <div className="absolute right-4 top-4 flex flex-col items-end gap-1">
-                          <span className="bg-emerald-500/20 text-emerald-500 text-xs font-bold px-2 py-0.5 rounded">
-                            {hasFinishedMatches ? `${teamPoints} pts` : 'TBD'}
-                          </span>
-                          <span className="text-[10px] text-neutral-500">Group {team.group}</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-3 mb-2">
+                      <div className="p-4 border-b border-neutral-800 bg-neutral-950">
+                        <div className="flex items-center gap-3">
                           <img src={`https://flagcdn.com/w40/${team.flagCode}.png`} alt="" className="w-8 h-6 object-cover rounded shadow-sm" />
                           <h3 className="font-bold text-lg">{team.name}</h3>
                         </div>
-                        
                       </div>
-                      
+
                       <div className="p-4 flex-1 bg-neutral-900">
                         <h4 className="text-xs text-neutral-500 uppercase tracking-wider font-bold mb-3 flex items-center gap-2">
-                          <Calendar className="w-3.5 h-3.5" /> Match Schedule
+                          <Calendar className="w-3.5 h-3.5" /> Upcoming Matches
                         </h4>
-                        
+
                         <div className="space-y-3">
-                          {teamMatches.map(match => {
+                          {teamMatches.map((match) => {
                             const isHome = match.home_team === team.id;
-                            const opponentId = isHome ? match.away_team : match.home_team;
-                            const opponent = TEAMS.find(t => t.id === opponentId)!;
-                            const { dateStr, timeStr } = formatMatchDate(match.match_date);
-                            
+                            const opponentCode = isHome ? match.away_team : match.home_team;
+                            const opponent = findTeamFromMatchCode(opponentCode);
+                            const { dateStr } = formatMatchDate(match.match_date);
+
                             return (
                               <div key={match.id} className="bg-neutral-950 rounded-lg p-3 border border-neutral-800/50 text-sm">
                                 <div className="flex justify-between items-center text-neutral-400 text-[10px] mb-2 font-medium uppercase tracking-wider">
                                   <span>{dateStr}</span>
-                                  <span>{timeStr}</span>
+                                  {match.status === 'finished' && match.home_score !== null && match.away_score !== null ? (
+                                    <span className="text-emerald-500 font-bold">{match.home_score} - {match.away_score}</span>
+                                  ) : match.status === 'live' ? (
+                                    <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">LIVE</span>
+                                  ) : (
+                                    <span>{formatMatchTime(match.match_date)}</span>
+                                  )}
                                 </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium text-neutral-300">vs</span>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-bold">{opponent.name}</span>
+                                {opponent && (
+                                  <div className="flex items-center justify-end gap-2">
+                                    <span className="font-bold">vs {opponent.name}</span>
                                     <img src={`https://flagcdn.com/w20/${opponent.flagCode}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" />
                                   </div>
-                                </div>
+                                )}
                               </div>
                             );
                           })}
@@ -823,9 +822,9 @@ export const LeagueDashboard = () => {
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
