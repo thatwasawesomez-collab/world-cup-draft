@@ -293,7 +293,7 @@ export const LeagueDashboard = () => {
             <h1 className="text-3xl font-black uppercase italic tracking-tight flex items-center gap-3">
               <Trophy className="text-emerald-500 w-8 h-8" /> League Dashboard
             </h1>
-            <p className="text-neutral-400 mt-1">League ID: <span className="text-emerald-400 font-mono">{id}</span></p>
+            <p className="text-neutral-400 mt-1">League Name: <span className="text-emerald-400 font-mono">{league?.name}</span></p>
           </div>
           
           <div className="flex bg-neutral-950 p-1 rounded-xl border border-neutral-800">

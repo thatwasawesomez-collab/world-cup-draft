@@ -200,7 +200,7 @@ export const DraftRoom = () => {
           <Trophy className="text-emerald-500 w-8 h-8" />
           <div>
             <h1 className="text-xl font-black uppercase italic tracking-tight">Draft Room</h1>
-            <p className="text-xs text-neutral-400">Pick {Math.min(draftState?.current_pick ?? 1, TOTAL_PICKS)} of {TOTAL_PICKS} • Round {Math.min(draftState?.current_round ?? 1, PICKS_PER_PLAYER)}</p>
+            <p className="text-xs text-neutral-400">{league?.name} • Pick {Math.min(draftState?.current_pick ?? 1, TOTAL_PICKS)} of {TOTAL_PICKS} • Round {Math.min(draftState?.current_round ?? 1, PICKS_PER_PLAYER)}</p>
           </div>
         </div>
 

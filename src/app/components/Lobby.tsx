@@ -203,9 +203,7 @@ export const Lobby = () => {
             <h1 className="text-3xl font-black uppercase italic tracking-tight flex items-center gap-3">
               <Users className="text-emerald-500" /> League Lobby
             </h1>
-            <p className="text-neutral-400 mt-1">
-              <span className="text-emerald-400 font-semibold">{league?.name ?? 'League'}</span>
-            </p>
+            <p className="text-neutral-400 mt-1">League Name: <span className="text-emerald-400 font-mono">{league?.name}</span></p>
           </div>
           <button
             onClick={() => navigate('/')}
