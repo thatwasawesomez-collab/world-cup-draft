@@ -329,6 +329,11 @@ export const LeagueDashboard = () => {
       .filter(Boolean) as { team: (typeof TEAMS)[number]; matches: Match[] }[];
   }, [schedulePicks, scheduleMatches, currentUserId]);
 
+  const validScheduleMatches = useMemo(
+    () => scheduleMatches.filter((m) => m.home_team != null && m.away_team != null),
+    [scheduleMatches],
+  );
+
   const scheduleWeekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
       const date = new Date(scheduleWeekStart);
@@ -338,10 +343,10 @@ export const LeagueDashboard = () => {
   }, [scheduleWeekStart]);
 
   const matchesOnSelectedDate = useMemo(() => {
-    return scheduleMatches
+    return validScheduleMatches
       .filter((m) => getLocalDateKey(new Date(m.match_date)) === selectedScheduleDate)
       .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
-  }, [scheduleMatches, selectedScheduleDate]);
+  }, [validScheduleMatches, selectedScheduleDate]);
 
   const tournamentCountdown = useMemo(() => {
     const target = new Date('2026-06-11T00:00:00').getTime();
@@ -354,11 +359,11 @@ export const LeagueDashboard = () => {
   }, [countdownNow]);
 
   useEffect(() => {
-    if (scheduleMatches.length > 0 || activeTab !== 'schedule') return;
+    if (validScheduleMatches.length > 0 || activeTab !== 'schedule') return;
 
     const interval = setInterval(() => setCountdownNow(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, [scheduleMatches.length, activeTab]);
+  }, [validScheduleMatches.length, activeTab]);
 
   const formatSchedulePill = (date: Date) => {
     const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
@@ -623,7 +628,7 @@ export const LeagueDashboard = () => {
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                 </div>
-              ) : scheduleMatches.length === 0 ? (
+              ) : validScheduleMatches.length === 0 ? (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center">
                   <Calendar className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
                   <p className="text-lg text-neutral-300 mb-6">
@@ -689,11 +694,18 @@ export const LeagueDashboard = () => {
                       <p className="text-neutral-500 italic text-center py-12">No matches on this date</p>
                     ) : (
                       <div>
-                        {matchesOnSelectedDate
-                          .filter((match) => match.home_team && match.away_team)
-                          .map((match) => {
-                          const homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
-                          const awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                        {matchesOnSelectedDate.map((match) => {
+                          const homeFlagCode = match.home_team
+                            ? (TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase())
+                            : '';
+                          const awayFlagCode = match.away_team
+                            ? (TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase())
+                            : '';
+
+                          if (!homeFlagCode || !awayFlagCode) {
+                            return null;
+                          }
+
                           const homeTeam = TEAMS.find((t) => t.id === homeFlagCode);
                           const awayTeam = TEAMS.find((t) => t.id === awayFlagCode);
                           const homeOwner = findMemberForTeam(homeFlagCode, schedulePicks, scheduleMembers);
@@ -748,7 +760,7 @@ export const LeagueDashboard = () => {
                               </div>
                             </div>
                           );
-                        })}
+                        }).filter(Boolean)}
                       </div>
                     )}
                   </div>
