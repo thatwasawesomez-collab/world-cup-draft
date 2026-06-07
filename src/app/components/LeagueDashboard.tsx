@@ -362,8 +362,7 @@ export const LeagueDashboard = () => {
 
   const formatSchedulePill = (date: Date) => {
     const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
-    const rest = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    return `${weekday} ${rest}`;
+    return `${weekday} ${date.getDate()}`;
   };
 
   const formatMatchTime = (isoString: string) =>
@@ -661,7 +660,7 @@ export const LeagueDashboard = () => {
                             key={dateKey}
                             onClick={() => setSelectedScheduleDate(dateKey)}
                             className={twMerge(
-                              'px-4 py-2 rounded-full font-bold text-sm whitespace-nowrap transition-colors border',
+                              'w-16 py-2 rounded-full font-bold text-sm transition-colors border flex flex-col items-center',
                               isSelected
                                 ? 'bg-emerald-500 border-emerald-500 text-neutral-950'
                                 : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700',
@@ -689,77 +688,63 @@ export const LeagueDashboard = () => {
                     {matchesOnSelectedDate.length === 0 ? (
                       <p className="text-neutral-500 italic text-center py-12">No matches on this date</p>
                     ) : (
-                      <div className="divide-y divide-neutral-800">
-                        {matchesOnSelectedDate.map((match) => {
+                      <div>
+                        {matchesOnSelectedDate
+                          .filter((match) => match.home_team && match.away_team)
+                          .map((match) => {
                           const homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
                           const awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
                           const homeTeam = TEAMS.find((t) => t.id === homeFlagCode);
                           const awayTeam = TEAMS.find((t) => t.id === awayFlagCode);
-                          const homeMember = findMemberForTeam(homeFlagCode, schedulePicks, scheduleMembers);
-                          const awayMember = findMemberForTeam(awayFlagCode, schedulePicks, scheduleMembers);
+                          const homeOwner = findMemberForTeam(homeFlagCode, schedulePicks, scheduleMembers);
+                          const awayOwner = findMemberForTeam(awayFlagCode, schedulePicks, scheduleMembers);
                           const isRivalry = !!(
-                            homeMember &&
-                            awayMember &&
-                            homeMember.user_id !== awayMember.user_id
+                            homeOwner &&
+                            awayOwner &&
+                            homeOwner.user_id !== awayOwner.user_id
                           );
 
                           return (
-                            <div key={match.id} className="bg-neutral-950 px-5 py-4 flex items-center gap-4">
-                              <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
-                                <>
-                                  <span className="font-bold truncate text-right">{homeTeam?.name ?? match.home_team}</span>
-                                  <img
-                                    src={`https://flagcdn.com/w40/${homeFlagCode}.png`}
-                                    alt=""
-                                    className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                  />
-                                </>
-                                {homeMember && (
+                            <div key={match.id} className="flex items-center justify-between px-4 py-3 border-b border-neutral-800/50">
+                              <div className="flex items-center gap-2 w-2/5">
+                                <img src={`https://flagcdn.com/w40/${homeFlagCode}.png`} alt="" className="w-8 h-6 object-cover rounded-sm" />
+                                <span className="font-semibold">{homeTeam?.name ?? match.home_team}</span>
+                                {homeOwner && (
                                   <div className={twMerge(
-                                    'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
-                                    homeMember.color,
+                                    'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
+                                    homeOwner.color,
                                   )}>
-                                    {homeMember.username.charAt(0).toUpperCase()}
+                                    {homeOwner.username.charAt(0)}
                                   </div>
                                 )}
                               </div>
 
-                              <div className="w-24 flex flex-col items-center justify-center shrink-0">
-                                {match.status === 'finished' && match.home_score !== null && match.away_score !== null ? (
-                                  <span className="text-lg font-black text-white">
-                                    {match.home_score} - {match.away_score}
-                                  </span>
-                                ) : match.status === 'live' ? (
-                                  <span className="bg-red-500/20 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full uppercase">
-                                    LIVE
-                                  </span>
-                                ) : (
-                                  <span className="text-sm font-semibold text-neutral-400">
-                                    {formatMatchTime(match.match_date)}
-                                  </span>
+                              <div className="flex flex-col items-center w-1/5">
+                                {match.status === 'finished' && (
+                                  <span className="font-bold">{match.home_score} - {match.away_score}</span>
+                                )}
+                                {match.status === 'live' && (
+                                  <span className="text-red-500 font-bold animate-pulse">LIVE</span>
+                                )}
+                                {match.status === 'scheduled' && (
+                                  <span className="text-neutral-400 text-sm">{formatMatchTime(match.match_date)}</span>
                                 )}
                                 {isRivalry && (
-                                  <span className="text-neutral-500 text-xs mt-1">⚔</span>
+                                  <span className="text-[10px] text-emerald-500">⚔ Rivalry</span>
                                 )}
                               </div>
 
-                              <div className="flex-1 flex items-center gap-2 min-w-0">
-                                {awayMember && (
+                              <div className="flex items-center gap-2 w-2/5 justify-end">
+                                {awayOwner && (
                                   <div className={twMerge(
-                                    'w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0',
-                                    awayMember.color,
+                                    'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
+                                    awayOwner.color,
                                   )}>
-                                    {awayMember.username.charAt(0).toUpperCase()}
+                                    {awayOwner.username.charAt(0)}
                                   </div>
                                 )}
-                                <>
-                                  <img
-                                    src={`https://flagcdn.com/w40/${awayFlagCode}.png`}
-                                    alt=""
-                                    className="w-8 h-6 object-cover rounded shadow-sm shrink-0"
-                                  />
-                                  <span className="font-bold truncate">{awayTeam?.name ?? match.away_team}</span>
-                                </>
+                                <span className="font-semibold">{awayTeam?.name ?? match.away_team}</span>
+                                <img src={`https://flagcdn.com/w40/${awayFlagCode}.png`} alt="" className="w-8 h-6 object-cover rounded-sm" />
                               </div>
                             </div>
                           );
