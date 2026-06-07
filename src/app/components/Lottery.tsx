@@ -5,8 +5,7 @@ import { supabase } from '../../lib/supabase';
 import type { League, LeagueMember } from '../../types/index';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { Play, Loader2 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { Loader2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 
 export const Lottery = () => {
@@ -15,8 +14,11 @@ export const Lottery = () => {
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [currentUserId, setCurrentUserId] = useState('');
   const [loading, setLoading] = useState(true);
   const [positionsSaved, setPositionsSaved] = useState(false);
+
+  const isHost = league?.host_user_id === currentUserId;
 
   const [stage, setStage] = useState<'intro' | 'bouncing' | 'dispensing' | 'done'>('intro');
   const [shuffledMembers, setShuffledMembers] = useState<LeagueMember[]>([]);
@@ -29,14 +31,44 @@ export const Lottery = () => {
     if (!id) return;
 
     setLoading(true);
-    fetchLeague(id)
-      .then(({ league: fetchedLeague, members: fetchedMembers }) => {
+    Promise.all([fetchLeague(id), supabase.auth.getUser()])
+      .then(([{ league: fetchedLeague, members: fetchedMembers }, { data: { user } }]) => {
         setLeague(fetchedLeague);
         setMembers(fetchedMembers);
         setShuffledMembers(fetchedMembers);
+        setCurrentUserId(user?.id ?? '');
       })
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!id || loading || isHost) return;
+
+    const channel = supabase
+      .channel(`league_members_lottery:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'league_members',
+          filter: `league_id=eq.${id}`,
+        },
+        async () => {
+          const { members: updatedMembers } = await fetchLeague(id);
+          const ordered = [...updatedMembers].sort((a, b) => a.draft_position - b.draft_position);
+          setMembers(ordered);
+          setShuffledMembers(ordered);
+          setStage('done');
+          navigate(`/league/${id}/draft`);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, loading, isHost, navigate]);
 
   useEffect(() => {
     if (loading) return;
@@ -46,7 +78,8 @@ export const Lottery = () => {
   }, [loading, league, members, navigate]);
 
   useEffect(() => {
-    if (stage === 'bouncing') {
+    if (!isHost || stage !== 'bouncing') return;
+
       const finalOrder = [...members].sort(() => Math.random() - 0.5);
       setShuffledMembers(finalOrder);
 
@@ -62,10 +95,11 @@ export const Lottery = () => {
       }, 3000);
 
       return () => clearTimeout(timeout);
-    }
-  }, [stage, members]);
+  }, [stage, members, isHost]);
 
   useEffect(() => {
+    if (!isHost) return;
+
     if (stage === 'dispensing' && revealedCount < maxMembers) {
       const timeout = setTimeout(() => {
         setRevealedCount(c => c + 1);
@@ -81,10 +115,10 @@ export const Lottery = () => {
         colors: ['#10b981', '#34d399', '#ffffff']
       });
     }
-  }, [stage, revealedCount, maxMembers]);
+  }, [stage, revealedCount, maxMembers, isHost]);
 
   useEffect(() => {
-    if (stage !== 'done' || !id || positionsSaved || shuffledMembers.length === 0) return;
+    if (!isHost || stage !== 'done' || !id || positionsSaved || shuffledMembers.length === 0) return;
 
     const saveDraftPositions = async () => {
       const results = await Promise.all(
@@ -112,10 +146,11 @@ export const Lottery = () => {
       }
 
       setPositionsSaved(true);
+      navigate(`/league/${id}/draft`);
     };
 
     saveDraftPositions();
-  }, [stage, id, shuffledMembers, positionsSaved]);
+  }, [stage, id, shuffledMembers, positionsSaved, isHost, navigate]);
 
   if (loading) {
     return (
@@ -142,18 +177,28 @@ export const Lottery = () => {
             className="flex flex-col items-center"
           >
             <p className="text-xl text-neutral-400 mb-8 text-center max-w-xl">
-              The draft lottery randomly determines the order you pick teams. Who will secure the first overall pick?
+              {isHost
+                ? 'The draft lottery randomly determines the order you pick teams. Who will secure the first overall pick?'
+                : 'Waiting for the host to run the draft lottery...'}
             </p>
-            <button
-              onClick={() => setStage('bouncing')}
-              className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold text-2xl py-4 px-12 rounded-full transition-transform hover:scale-105 active:scale-95 shadow-[0_0_40px_-10px_rgba(16,185,129,0.5)]"
-            >
-              Start Lottery
-            </button>
+            {isHost && (
+              <button
+                onClick={() => setStage('bouncing')}
+                className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold text-2xl py-4 px-12 rounded-full transition-transform hover:scale-105 active:scale-95 shadow-[0_0_40px_-10px_rgba(16,185,129,0.5)]"
+              >
+                Start Lottery
+              </button>
+            )}
+            {!isHost && (
+              <div className="flex items-center gap-3 text-neutral-400">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                <span>Watching for lottery results...</span>
+              </div>
+            )}
           </motion.div>
         )}
 
-        {(stage === 'bouncing' || stage === 'dispensing' || stage === 'done') && (
+        {isHost && (stage === 'bouncing' || stage === 'dispensing' || stage === 'done') && (
           <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
 
             {/* Gumball Machine */}
@@ -316,21 +361,6 @@ export const Lottery = () => {
                 )}
               </AnimatePresence>
             </div>
-
-            {stage === 'done' && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="absolute -top-6 -right-6 z-20"
-              >
-                <button
-                  onClick={() => navigate(`/league/${id}/draft`)}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold px-8 py-4 rounded-full flex items-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95"
-                >
-                  Enter Draft Room <Play className="fill-current w-5 h-5" />
-                </button>
-              </motion.div>
-            )}
 
             <div className="space-y-4 w-full">
               <AnimatePresence>

@@ -181,7 +181,7 @@ export function useDraft(leagueId: string) {
     loadDraft();
 
     const channel = supabase
-      .channel(`draft_picks:${leagueId}`)
+      .channel(`draft-picks-${leagueId}`)
       .on(
         'postgres_changes',
         {
@@ -230,6 +230,24 @@ export function useDraft(leagueId: string) {
     });
   }, [members]);
 
+  const onPickMade = useCallback((newPick: DraftPick) => {
+    setDraftState((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      if (prev.picks.some((pick) => pick.pickNumber === newPick.pickNumber)) {
+        return prev;
+      }
+
+      const updatedPicks = [...prev.picks, newPick].sort(
+        (a, b) => a.pickNumber - b.pickNumber,
+      );
+
+      return buildDraftState(updatedPicks, membersRef.current);
+    });
+  }, []);
+
   const makePick = useCallback(
     async (teamCode: string) => {
       if (!draftState) {
@@ -255,8 +273,14 @@ export function useDraft(leagueId: string) {
       if (insertError) {
         throw new Error(`Failed to make pick: ${insertError.message}`);
       }
+
+      onPickMade({
+        teamId: teamCode,
+        playerId: currentUserId,
+        pickNumber: draftState.current_pick,
+      });
     },
-    [currentUserId, draftState, isMyTurn, leagueId],
+    [currentUserId, draftState, isMyTurn, leagueId, onPickMade],
   );
 
   return {
