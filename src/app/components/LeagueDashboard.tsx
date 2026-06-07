@@ -310,17 +310,29 @@ export const LeagueDashboard = () => {
   const getLocalDateKey = (date: Date) => date.toLocaleDateString('en-CA');
 
   const currentUserTeams = useMemo(() => {
+    const safeMatches = scheduleMatches.filter((m) =>
+      m != null &&
+      m.home_team != null &&
+      m.away_team != null &&
+      typeof m.home_team === 'string' &&
+      typeof m.away_team === 'string',
+    );
+
     const myPicks = schedulePicks.filter((p) => p.playerId === currentUserId);
     return myPicks
       .map((pick) => {
         const team = TEAMS.find((t) => t.id === pick.teamId);
         if (!team) return null;
 
-        const teamMatches = scheduleMatches
+        const teamMatches = safeMatches
           .filter((m) => {
-            const homeFlagCode = TLA_TO_TEAM[m.home_team] ?? m.home_team.toLowerCase();
-            const awayFlagCode = TLA_TO_TEAM[m.away_team] ?? m.away_team.toLowerCase();
-            return homeFlagCode === team.id || awayFlagCode === team.id;
+            try {
+              const homeFlagCode = TLA_TO_TEAM[m.home_team] ?? m.home_team.toLowerCase();
+              const awayFlagCode = TLA_TO_TEAM[m.away_team] ?? m.away_team.toLowerCase();
+              return homeFlagCode === team.id || awayFlagCode === team.id;
+            } catch {
+              return false;
+            }
           })
           .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
 
@@ -329,10 +341,16 @@ export const LeagueDashboard = () => {
       .filter(Boolean) as { team: (typeof TEAMS)[number]; matches: Match[] }[];
   }, [schedulePicks, scheduleMatches, currentUserId]);
 
-  const validScheduleMatches = useMemo(
-    () => scheduleMatches.filter((m) => m.home_team != null && m.away_team != null),
-    [scheduleMatches],
-  );
+  const safeScheduleMatches = useMemo(() => {
+    const safeMatches = scheduleMatches.filter((m) =>
+      m != null &&
+      m.home_team != null &&
+      m.away_team != null &&
+      typeof m.home_team === 'string' &&
+      typeof m.away_team === 'string',
+    );
+    return safeMatches;
+  }, [scheduleMatches]);
 
   const scheduleWeekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
@@ -343,10 +361,18 @@ export const LeagueDashboard = () => {
   }, [scheduleWeekStart]);
 
   const matchesOnSelectedDate = useMemo(() => {
-    return validScheduleMatches
+    const safeMatches = scheduleMatches.filter((m) =>
+      m != null &&
+      m.home_team != null &&
+      m.away_team != null &&
+      typeof m.home_team === 'string' &&
+      typeof m.away_team === 'string',
+    );
+
+    return safeMatches
       .filter((m) => getLocalDateKey(new Date(m.match_date)) === selectedScheduleDate)
       .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
-  }, [validScheduleMatches, selectedScheduleDate]);
+  }, [scheduleMatches, selectedScheduleDate]);
 
   const tournamentCountdown = useMemo(() => {
     const target = new Date('2026-06-11T00:00:00').getTime();
@@ -359,11 +385,11 @@ export const LeagueDashboard = () => {
   }, [countdownNow]);
 
   useEffect(() => {
-    if (validScheduleMatches.length > 0 || activeTab !== 'schedule') return;
+    if (safeScheduleMatches.length > 0 || activeTab !== 'schedule') return;
 
     const interval = setInterval(() => setCountdownNow(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, [validScheduleMatches.length, activeTab]);
+  }, [safeScheduleMatches.length, activeTab]);
 
   const formatSchedulePill = (date: Date) => {
     const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
@@ -628,7 +654,7 @@ export const LeagueDashboard = () => {
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                 </div>
-              ) : validScheduleMatches.length === 0 ? (
+              ) : safeScheduleMatches.length === 0 ? (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center">
                   <Calendar className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
                   <p className="text-lg text-neutral-300 mb-6">
@@ -695,12 +721,15 @@ export const LeagueDashboard = () => {
                     ) : (
                       <div>
                         {matchesOnSelectedDate.map((match) => {
-                          const homeFlagCode = match.home_team
-                            ? (TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase())
-                            : '';
-                          const awayFlagCode = match.away_team
-                            ? (TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase())
-                            : '';
+                          let homeFlagCode = '';
+                          let awayFlagCode = '';
+
+                          try {
+                            homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
+                            awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                          } catch {
+                            return null;
+                          }
 
                           if (!homeFlagCode || !awayFlagCode) {
                             return null;
@@ -775,7 +804,7 @@ export const LeagueDashboard = () => {
                 <Clock className="w-4 h-4" /> Times shown in <span className="text-emerald-500 font-medium">{localTimeZone}</span>
               </div>
 
-              {scheduleMatches.length === 0 ? (
+              {safeScheduleMatches.length === 0 ? (
                 <p className="text-neutral-500 italic text-center py-12">No matches scheduled yet</p>
               ) : currentUserTeams.length === 0 ? (
                 <p className="text-neutral-500 italic text-center py-12">No drafted teams found.</p>
@@ -797,8 +826,20 @@ export const LeagueDashboard = () => {
 
                         <div className="space-y-3">
                           {teamMatches.map((match) => {
-                            const homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
-                            const awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                            let homeFlagCode = '';
+                            let awayFlagCode = '';
+
+                            try {
+                              homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
+                              awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
+                            } catch {
+                              return null;
+                            }
+
+                            if (!homeFlagCode || !awayFlagCode) {
+                              return null;
+                            }
+
                             const isHome = homeFlagCode === team.id;
                             const opponentFlagCode = isHome ? awayFlagCode : homeFlagCode;
                             const opponentTla = isHome ? match.away_team : match.home_team;
@@ -823,7 +864,7 @@ export const LeagueDashboard = () => {
                                 </div>
                               </div>
                             );
-                          })}
+                          }).filter(Boolean)}
                           {teamMatches.length === 0 && (
                             <p className="text-sm text-neutral-500 italic">No matches scheduled yet.</p>
                           )}
