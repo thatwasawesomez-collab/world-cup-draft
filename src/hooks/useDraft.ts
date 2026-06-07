@@ -93,10 +93,11 @@ export function useDraft(leagueId: string) {
   const membersRef = useRef<LeagueMember[]>([]);
 
   const picks = draftState?.picks ?? [];
-  const isMyTurn =
-    currentUserId !== '' &&
+  const isMyTurn = currentUserId !== '' &&
     draftState?.current_user_id === currentUserId &&
     !draftState?.is_complete;
+  console.log('isMyTurn:', isMyTurn, 'currentUserId:', currentUserId,
+    'draftState.current_user_id:', draftState?.current_user_id);
 
   useEffect(() => {
     let isMounted = true;
@@ -160,9 +161,12 @@ export function useDraft(leagueId: string) {
         );
 
         setCurrentUserId(user.id);
+        console.log('currentUserId set to:', user.id);
         membersRef.current = fetchedMembers;
         setMembers(fetchedMembers);
         setDraftState(buildDraftState(fetchedPicks, fetchedMembers));
+        console.log('draftState:', buildDraftState(fetchedPicks, fetchedMembers));
+        console.log('members:', fetchedMembers);
       } catch (err) {
         if (isMounted) {
           setError(err instanceof Error ? err.message : 'Failed to load draft');
