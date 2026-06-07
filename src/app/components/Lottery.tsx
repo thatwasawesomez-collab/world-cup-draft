@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { fetchLeague } from '../../hooks/useLeague';
 import { supabase } from '../../lib/supabase';
 import type { League, LeagueMember } from '../../types/index';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Play } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 
 export const Lottery = () => {
@@ -25,7 +25,58 @@ export const Lottery = () => {
   const [revealedCount, setRevealedCount] = useState(0);
   const [ballPositions, setBallPositions] = useState<{ x: number; y: number }[]>([]);
 
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
+  const initialOrderRef = useRef<string[]>([]);
+
   const maxMembers = league?.max_members ?? 0;
+  const memberCount = shuffledMembers.length || maxMembers;
+
+  const saveDraftPositions = useCallback(async (order: LeagueMember[]) => {
+    if (!id) return false;
+
+    const results = await Promise.all(
+      order.map((member, index) =>
+        supabase
+          .from('league_members')
+          .update({ draft_position: index + 1 })
+          .eq('league_id', id)
+          .eq('user_id', member.user_id),
+      ),
+    );
+
+    const failures = results
+      .map((result, index) => ({ result, member: order[index], index }))
+      .filter(({ result }) => result.error);
+
+    if (failures.length > 0) {
+      failures.forEach(({ result, member, index }) => {
+        console.error(
+          `Failed to save draft_position ${index + 1} for ${member.username} (${member.user_id}):`,
+          result.error,
+        );
+      });
+      return false;
+    }
+
+    return true;
+  }, [id]);
+
+  const applySyncedOrder = useCallback((ordered: LeagueMember[]) => {
+    setMembers(ordered);
+    setShuffledMembers(ordered);
+    setBallPositions(
+      ordered.map(() => ({
+        x: Math.random() * 200 - 100,
+        y: Math.random() * 150 - 75,
+      })),
+    );
+
+    if (stageRef.current === 'intro' || stageRef.current === 'bouncing') {
+      setStage('dispensing');
+      setRevealedCount(0);
+    }
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -37,6 +88,13 @@ export const Lottery = () => {
         setMembers(fetchedMembers);
         setShuffledMembers(fetchedMembers);
         setCurrentUserId(user?.id ?? '');
+        initialOrderRef.current = [...fetchedMembers]
+          .sort((a, b) => a.draft_position - b.draft_position)
+          .map((m) => m.user_id);
+
+        if (fetchedLeague.draft_status === 'lottery') {
+          setStage('bouncing');
+        }
       })
       .finally(() => setLoading(false));
   }, [id]);
@@ -44,7 +102,7 @@ export const Lottery = () => {
   useEffect(() => {
     if (!id || loading || isHost) return;
 
-    const channel = supabase
+    const membersChannel = supabase
       .channel(`league_members_lottery:${id}`)
       .on(
         'postgres_changes',
@@ -55,20 +113,67 @@ export const Lottery = () => {
           filter: `league_id=eq.${id}`,
         },
         async () => {
-          const { members: updatedMembers } = await fetchLeague(id);
+          const { league: fetchedLeague, members: updatedMembers } = await fetchLeague(id);
+          if (fetchedLeague.draft_status !== 'lottery') return;
+
           const ordered = [...updatedMembers].sort((a, b) => a.draft_position - b.draft_position);
-          setMembers(ordered);
-          setShuffledMembers(ordered);
-          setStage('done');
-          navigate(`/league/${id}/draft`);
+          applySyncedOrder(ordered);
         },
       )
       .subscribe();
 
+    const leaguesChannel = supabase
+      .channel(`leagues_lottery:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'leagues',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          const updated = payload.new as { draft_status?: string };
+          if (updated.draft_status === 'lottery') {
+            setStage('bouncing');
+            setRevealedCount(0);
+          }
+        },
+      )
+      .subscribe();
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const { league: fetchedLeague, members: fetchedMembers } = await fetchLeague(id);
+        setLeague(fetchedLeague);
+
+        if (fetchedLeague.draft_status === 'lottery') {
+          if (stageRef.current === 'intro') {
+            setStage('bouncing');
+          }
+
+          const ordered = [...fetchedMembers].sort((a, b) => a.draft_position - b.draft_position);
+          const orderedIds = ordered.map((m) => m.user_id).join(',');
+          const initialIds = initialOrderRef.current.join(',');
+
+          if (
+            orderedIds !== initialIds &&
+            (stageRef.current === 'bouncing' || stageRef.current === 'intro')
+          ) {
+            applySyncedOrder(ordered);
+          }
+        }
+      } catch {
+        // polling is a fallback for realtime
+      }
+    }, 2000);
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(membersChannel);
+      supabase.removeChannel(leaguesChannel);
+      clearInterval(pollInterval);
     };
-  }, [id, loading, isHost, navigate]);
+  }, [id, loading, isHost, applySyncedOrder]);
 
   useEffect(() => {
     if (loading) return;
@@ -77,80 +182,74 @@ export const Lottery = () => {
     }
   }, [loading, league, members, navigate]);
 
+  const handleStartLottery = async () => {
+    if (!id) return;
+
+    const { error } = await supabase
+      .from('leagues')
+      .update({ draft_status: 'lottery' })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Failed to start lottery:', error);
+      return;
+    }
+
+    setLeague((prev) => (prev ? { ...prev, draft_status: 'lottery' } : prev));
+    setStage('bouncing');
+  };
+
   useEffect(() => {
     if (!isHost || stage !== 'bouncing') return;
 
-      const finalOrder = [...members].sort(() => Math.random() - 0.5);
-      setShuffledMembers(finalOrder);
+    const finalOrder = [...members].sort(() => Math.random() - 0.5);
+    setShuffledMembers(finalOrder);
 
-      const positions = finalOrder.map(() => ({
-        x: Math.random() * 200 - 100,
-        y: Math.random() * 150 - 75
-      }));
-      setBallPositions(positions);
+    const positions = finalOrder.map(() => ({
+      x: Math.random() * 200 - 100,
+      y: Math.random() * 150 - 75,
+    }));
+    setBallPositions(positions);
 
-      const timeout = setTimeout(() => {
-        setStage('dispensing');
-        setRevealedCount(0);
-      }, 3000);
+    const timeout = setTimeout(() => {
+      setStage('dispensing');
+      setRevealedCount(0);
+    }, 3000);
 
-      return () => clearTimeout(timeout);
+    return () => clearTimeout(timeout);
   }, [stage, members, isHost]);
 
   useEffect(() => {
-    if (!isHost) return;
+    if (!isHost || stage !== 'dispensing' || positionsSaved || shuffledMembers.length === 0) return;
 
-    if (stage === 'dispensing' && revealedCount < maxMembers) {
-      const timeout = setTimeout(() => {
-        setRevealedCount(c => c + 1);
-      }, 2000);
-
-      return () => clearTimeout(timeout);
-    } else if (stage === 'dispensing' && revealedCount === maxMembers) {
-      setStage('done');
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#10b981', '#34d399', '#ffffff']
-      });
-    }
-  }, [stage, revealedCount, maxMembers, isHost]);
+    saveDraftPositions(shuffledMembers).then((success) => {
+      if (success) {
+        setPositionsSaved(true);
+      }
+    });
+  }, [stage, isHost, positionsSaved, shuffledMembers, saveDraftPositions]);
 
   useEffect(() => {
-    if (!isHost || stage !== 'done' || !id || positionsSaved || shuffledMembers.length === 0) return;
+    if (stage !== 'dispensing' || revealedCount >= memberCount) return;
 
-    const saveDraftPositions = async () => {
-      const results = await Promise.all(
-        shuffledMembers.map((member, index) =>
-          supabase
-            .from('league_members')
-            .update({ draft_position: index + 1 })
-            .eq('league_id', id)
-            .eq('user_id', member.user_id),
-        ),
-      );
+    const timeout = setTimeout(() => {
+      setRevealedCount((c) => c + 1);
+    }, 2000);
 
-      const failures = results
-        .map((result, index) => ({ result, member: shuffledMembers[index], index }))
-        .filter(({ result }) => result.error);
+    return () => clearTimeout(timeout);
+  }, [stage, revealedCount, memberCount]);
 
-      if (failures.length > 0) {
-        failures.forEach(({ result, member, index }) => {
-          console.error(
-            `Failed to save draft_position ${index + 1} for ${member.username} (${member.user_id}):`,
-            result.error,
-          );
-        });
-        return;
-      }
+  useEffect(() => {
+    if (stage !== 'dispensing' || revealedCount < memberCount) return;
 
-      setPositionsSaved(true);
-      navigate(`/league/${id}/draft`);
-    };
-
-    saveDraftPositions();
-  }, [stage, id, shuffledMembers, positionsSaved, isHost, navigate]);
+    setStage('done');
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#10b981', '#34d399', '#ffffff'],
+    });
+  }, [stage, revealedCount, memberCount]);
 
   if (loading) {
     return (
@@ -159,6 +258,8 @@ export const Lottery = () => {
       </div>
     );
   }
+
+  const showLotteryUI = stage === 'bouncing' || stage === 'dispensing' || stage === 'done';
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50 p-6 flex flex-col items-center justify-center relative overflow-hidden">
@@ -183,7 +284,7 @@ export const Lottery = () => {
             </p>
             {isHost && (
               <button
-                onClick={() => setStage('bouncing')}
+                onClick={handleStartLottery}
                 className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold text-2xl py-4 px-12 rounded-full transition-transform hover:scale-105 active:scale-95 shadow-[0_0_40px_-10px_rgba(16,185,129,0.5)]"
               >
                 Start Lottery
@@ -192,14 +293,20 @@ export const Lottery = () => {
             {!isHost && (
               <div className="flex items-center gap-3 text-neutral-400">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-                <span>Watching for lottery results...</span>
+                <span>Watching for lottery to begin...</span>
               </div>
             )}
           </motion.div>
         )}
 
-        {isHost && (stage === 'bouncing' || stage === 'dispensing' || stage === 'done') && (
+        {showLotteryUI && (
           <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
+
+            {!isHost && stage === 'bouncing' && (
+              <p className="text-sm text-emerald-400 mb-4 text-center">
+                Host is shuffling the draft order...
+              </p>
+            )}
 
             {/* Gumball Machine */}
             <div className="mb-8 relative w-96 h-[500px] flex flex-col items-center justify-start">
@@ -219,11 +326,9 @@ export const Lottery = () => {
                 {/* Bouncing soccer balls inside the globe */}
                 <div className="absolute inset-12 overflow-hidden rounded-full">
                   <AnimatePresence>
-                    {shuffledMembers.map((member, index) => {
+                    {(stage === 'bouncing' ? members : shuffledMembers).map((member, index) => {
                       if (stage === 'dispensing' && index < revealedCount) return null;
                       if (stage === 'done') return null;
-
-                      const initialPos = ballPositions[index] || { x: 0, y: 0 };
 
                       return (
                         <motion.div
@@ -306,7 +411,7 @@ export const Lottery = () => {
 
               {/* Ball being dispensed */}
               <AnimatePresence>
-                {stage === 'dispensing' && revealedCount > 0 && revealedCount <= maxMembers && (
+                {stage === 'dispensing' && revealedCount > 0 && revealedCount <= memberCount && (
                   <motion.div
                     key={`dispensing-${revealedCount - 1}`}
                     initial={{ y: 0, x: 0, opacity: 1, scale: 1 }}
@@ -326,7 +431,7 @@ export const Lottery = () => {
                     <div className="relative w-12 h-12 ring-4 ring-emerald-500/50 rounded-full">
                       <div className={twMerge(
                         "absolute inset-0 rounded-full shadow-2xl",
-                        shuffledMembers[revealedCount - 1].color
+                        shuffledMembers[revealedCount - 1]?.color
                       )}
                         style={{
                           boxShadow: '0 6px 20px rgba(0,0,0,0.6), inset -3px -3px 6px rgba(0,0,0,0.4), inset 3px 3px 6px rgba(255,255,255,0.3)'
@@ -353,7 +458,7 @@ export const Lottery = () => {
 
                       <div className="absolute inset-0 rounded-full flex items-center justify-center">
                         <span className="text-xs font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] z-10">
-                          {shuffledMembers[revealedCount - 1].username.charAt(0).toUpperCase()}
+                          {shuffledMembers[revealedCount - 1]?.username.charAt(0).toUpperCase()}
                         </span>
                       </div>
                     </div>
@@ -362,10 +467,26 @@ export const Lottery = () => {
               </AnimatePresence>
             </div>
 
+            {stage === 'done' && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="mb-6"
+              >
+                <button
+                  onClick={() => navigate(`/league/${id}/draft`)}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold px-8 py-4 rounded-full flex items-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95"
+                >
+                  Enter Draft Room <Play className="fill-current w-5 h-5" />
+                </button>
+              </motion.div>
+            )}
+
             <div className="space-y-4 w-full">
               <AnimatePresence>
-                {shuffledMembers.map((member, index) => {
-                  const isRevealed = stage === 'done' || index < revealedCount;
+                {(stage === 'bouncing' ? members : shuffledMembers).map((member, index) => {
+                  const isRevealed = stage === 'done' || (stage === 'dispensing' && index < revealedCount);
+                  const displayIndex = stage === 'bouncing' ? index : index;
 
                   return (
                     <motion.div
@@ -384,9 +505,9 @@ export const Lottery = () => {
                       <div className="w-12 text-center">
                         <span className={twMerge(
                           "text-2xl font-black italic",
-                          index === 0 && isRevealed ? "text-emerald-500" : "text-neutral-500"
+                          displayIndex === 0 && isRevealed ? "text-emerald-500" : "text-neutral-500"
                         )}>
-                          #{index + 1}
+                          {stage === 'bouncing' ? '?' : `#${displayIndex + 1}`}
                         </span>
                       </div>
 
@@ -397,7 +518,7 @@ export const Lottery = () => {
                           </div>
                           <span className="text-xl font-bold">{member.username}</span>
 
-                          {index === 0 && (
+                          {displayIndex === 0 && stage !== 'bouncing' && (
                             <span className="ml-auto bg-emerald-500/20 text-emerald-500 text-sm font-bold px-3 py-1 rounded-full uppercase tracking-wider">
                               1st Pick
                             </span>
