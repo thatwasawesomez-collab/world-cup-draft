@@ -89,12 +89,16 @@ export function useSchedule(leagueId: string) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
+        console.log('Calling Edge Function with session:', session?.access_token ? 'has token' : 'no token');
+
         const edgeResponse = await fetch(GET_MATCHES_URL, {
           headers: { Authorization: `Bearer ${session?.access_token}` },
         });
 
+        console.log('Edge Function response status:', edgeResponse.status);
         if (!edgeResponse.ok) {
           const errorBody = await edgeResponse.text();
+          console.error('Edge Function error:', errorBody);
           throw new Error(`Failed to fetch matches: ${edgeResponse.status} ${errorBody}`);
         }
 
@@ -137,6 +141,10 @@ export function useSchedule(leagueId: string) {
         if (membersResult.error) {
           throw new Error(`Failed to fetch league members: ${membersResult.error.message}`);
         }
+
+        console.log('Schedule loaded - matches:', matchesResult.data?.length,
+          'picks:', picksResult.data?.length,
+          'members:', membersResult.data?.length);
 
         if (!isMounted) return;
 
