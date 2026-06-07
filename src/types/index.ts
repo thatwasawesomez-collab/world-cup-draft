@@ -26,7 +26,7 @@ export interface League {
   invite_code: string;
   host_user_id: string;
   max_members: number;
-  draft_status: 'pending' | 'active' | 'lottery' | 'complete';
+  draft_status: 'pending' | 'active' | 'lottery' | 'lottery_order' | 'lottery_complete' | 'complete';
   draft_type: DraftType;
   created_at: string;
 }

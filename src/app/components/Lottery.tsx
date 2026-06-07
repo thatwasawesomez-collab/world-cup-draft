@@ -27,7 +27,8 @@ export const Lottery = () => {
 
   const stageRef = useRef(stage);
   stageRef.current = stage;
-  const initialOrderRef = useRef<string[]>([]);
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
 
   const maxMembers = league?.max_members ?? 0;
   const memberCount = shuffledMembers.length || maxMembers;
@@ -62,7 +63,10 @@ export const Lottery = () => {
     return true;
   }, [id]);
 
-  const applySyncedOrder = useCallback((ordered: LeagueMember[]) => {
+  const applySyncedOrder = useCallback((
+    ordered: LeagueMember[],
+    options?: { jumpToDone?: boolean },
+  ) => {
     setMembers(ordered);
     setShuffledMembers(ordered);
     setBallPositions(
@@ -72,11 +76,44 @@ export const Lottery = () => {
       })),
     );
 
+    if (options?.jumpToDone) {
+      setStage('done');
+      setRevealedCount(ordered.length);
+      return;
+    }
+
     if (stageRef.current === 'intro' || stageRef.current === 'bouncing') {
       setStage('dispensing');
       setRevealedCount(0);
     }
   }, []);
+
+  const handleLotteryStatus = useCallback(async (status: string) => {
+    if (!id) return;
+
+    const { league: fetchedLeague, members: fetchedMembers } = await fetchLeague(id);
+    setLeague(fetchedLeague);
+    const ordered = [...fetchedMembers].sort((a, b) => a.draft_position - b.draft_position);
+
+    if (status === 'lottery') {
+      if (stageRef.current === 'intro') {
+        setStage('bouncing');
+        setRevealedCount(0);
+      }
+      return;
+    }
+
+    if (status === 'lottery_order') {
+      if (isHostRef.current) return;
+      applySyncedOrder(ordered);
+      return;
+    }
+
+    if (status === 'lottery_complete') {
+      if (isHostRef.current && stageRef.current === 'done') return;
+      applySyncedOrder(ordered, { jumpToDone: true });
+    }
+  }, [id, applySyncedOrder]);
 
   useEffect(() => {
     if (!id) return;
@@ -88,39 +125,32 @@ export const Lottery = () => {
         setMembers(fetchedMembers);
         setShuffledMembers(fetchedMembers);
         setCurrentUserId(user?.id ?? '');
-        initialOrderRef.current = [...fetchedMembers]
-          .sort((a, b) => a.draft_position - b.draft_position)
-          .map((m) => m.user_id);
 
         if (fetchedLeague.draft_status === 'lottery') {
           setStage('bouncing');
+        } else if (fetchedLeague.draft_status === 'lottery_order') {
+          const ordered = [...fetchedMembers].sort((a, b) => a.draft_position - b.draft_position);
+          setShuffledMembers(ordered);
+          setBallPositions(
+            ordered.map(() => ({
+              x: Math.random() * 200 - 100,
+              y: Math.random() * 150 - 75,
+            })),
+          );
+          setStage('dispensing');
+          setRevealedCount(0);
+        } else if (fetchedLeague.draft_status === 'lottery_complete') {
+          const ordered = [...fetchedMembers].sort((a, b) => a.draft_position - b.draft_position);
+          setShuffledMembers(ordered);
+          setStage('done');
+          setRevealedCount(ordered.length);
         }
       })
       .finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => {
-    if (!id || loading || isHost) return;
-
-    const membersChannel = supabase
-      .channel(`league_members_lottery:${id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'league_members',
-          filter: `league_id=eq.${id}`,
-        },
-        async () => {
-          const { league: fetchedLeague, members: updatedMembers } = await fetchLeague(id);
-          if (fetchedLeague.draft_status !== 'lottery') return;
-
-          const ordered = [...updatedMembers].sort((a, b) => a.draft_position - b.draft_position);
-          applySyncedOrder(ordered);
-        },
-      )
-      .subscribe();
+    if (!id || loading) return;
 
     const leaguesChannel = supabase
       .channel(`leagues_lottery:${id}`)
@@ -134,9 +164,8 @@ export const Lottery = () => {
         },
         (payload) => {
           const updated = payload.new as { draft_status?: string };
-          if (updated.draft_status === 'lottery') {
-            setStage('bouncing');
-            setRevealedCount(0);
+          if (updated.draft_status) {
+            handleLotteryStatus(updated.draft_status);
           }
         },
       )
@@ -144,24 +173,13 @@ export const Lottery = () => {
 
     const pollInterval = setInterval(async () => {
       try {
-        const { league: fetchedLeague, members: fetchedMembers } = await fetchLeague(id);
-        setLeague(fetchedLeague);
-
-        if (fetchedLeague.draft_status === 'lottery') {
-          if (stageRef.current === 'intro') {
-            setStage('bouncing');
-          }
-
-          const ordered = [...fetchedMembers].sort((a, b) => a.draft_position - b.draft_position);
-          const orderedIds = ordered.map((m) => m.user_id).join(',');
-          const initialIds = initialOrderRef.current.join(',');
-
-          if (
-            orderedIds !== initialIds &&
-            (stageRef.current === 'bouncing' || stageRef.current === 'intro')
-          ) {
-            applySyncedOrder(ordered);
-          }
+        const { league: fetchedLeague } = await fetchLeague(id);
+        if (
+          fetchedLeague.draft_status === 'lottery' ||
+          fetchedLeague.draft_status === 'lottery_order' ||
+          fetchedLeague.draft_status === 'lottery_complete'
+        ) {
+          await handleLotteryStatus(fetchedLeague.draft_status);
         }
       } catch {
         // polling is a fallback for realtime
@@ -169,11 +187,10 @@ export const Lottery = () => {
     }, 2000);
 
     return () => {
-      supabase.removeChannel(membersChannel);
       supabase.removeChannel(leaguesChannel);
       clearInterval(pollInterval);
     };
-  }, [id, loading, isHost, applySyncedOrder]);
+  }, [id, loading, handleLotteryStatus]);
 
   useEffect(() => {
     if (loading) return;
@@ -222,12 +239,22 @@ export const Lottery = () => {
   useEffect(() => {
     if (!isHost || stage !== 'dispensing' || positionsSaved || shuffledMembers.length === 0) return;
 
-    saveDraftPositions(shuffledMembers).then((success) => {
+    saveDraftPositions(shuffledMembers).then(async (success) => {
       if (success) {
         setPositionsSaved(true);
+        const { error } = await supabase
+          .from('leagues')
+          .update({ draft_status: 'lottery_order' })
+          .eq('id', id);
+
+        if (error) {
+          console.error('Failed to broadcast lottery order:', error);
+        } else {
+          setLeague((prev) => (prev ? { ...prev, draft_status: 'lottery_order' } : prev));
+        }
       }
     });
-  }, [stage, isHost, positionsSaved, shuffledMembers, saveDraftPositions]);
+  }, [stage, isHost, positionsSaved, shuffledMembers, saveDraftPositions, id]);
 
   useEffect(() => {
     if (stage !== 'dispensing' || revealedCount >= memberCount) return;
@@ -250,6 +277,22 @@ export const Lottery = () => {
       colors: ['#10b981', '#34d399', '#ffffff'],
     });
   }, [stage, revealedCount, memberCount]);
+
+  useEffect(() => {
+    if (!isHost || stage !== 'done' || !id) return;
+
+    supabase
+      .from('leagues')
+      .update({ draft_status: 'lottery_complete' })
+      .eq('id', id)
+      .then(({ error }) => {
+        if (error) {
+          console.error('Failed to broadcast lottery complete:', error);
+        } else {
+          setLeague((prev) => (prev ? { ...prev, draft_status: 'lottery_complete' } : prev));
+        }
+      });
+  }, [stage, isHost, id]);
 
   if (loading) {
     return (
