@@ -247,7 +247,7 @@ export const DraftRoom = () => {
                   <button
                     key={team.id}
                     onClick={() => handlePick(team.id)}
-                    disabled={isDrafted || isDraftComplete || (picking && pickingTeamId !== team.id) || !isMyTurn}
+                    disabled={isDrafted || isDraftComplete || picking}
                     className={twMerge(
                       "relative rounded-lg overflow-hidden h-24 border-2 transition-colors group flex flex-col items-center justify-center p-2",
                       isDrafted

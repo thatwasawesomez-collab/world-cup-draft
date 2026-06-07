@@ -30,6 +30,26 @@ export const Lobby = () => {
     if (!id) return;
 
     let isMounted = true;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    const pollDraftStatus = async () => {
+      try {
+        const data = await fetchLeague(id);
+        if (!isMounted) return;
+
+        if (data.league.draft_status === 'active') {
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          navigate(`/league/${id}/lottery`);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : 'Failed to check draft status');
+        }
+      }
+    };
 
     const loadLeague = async () => {
       setLoading(true);
@@ -53,6 +73,12 @@ export const Lobby = () => {
         setCurrentUserId(user.id);
         setLeague(data.league);
         setMembers(data.members);
+
+        if (data.league.draft_status === 'active') {
+          navigate(`/league/${id}/lottery`);
+        } else if (!pollInterval) {
+          pollInterval = setInterval(pollDraftStatus, 3000);
+        }
       } catch (err) {
         if (isMounted) {
           setError(err instanceof Error ? err.message : 'Failed to load league');
@@ -92,29 +118,12 @@ export const Lobby = () => {
       )
       .subscribe();
 
-    const leaguesChannel = supabase
-      .channel(`leagues:${id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'leagues',
-          filter: `id=eq.${id}`,
-        },
-        (payload) => {
-          const updated = payload.new as { draft_status?: string };
-          if (isMounted && updated.draft_status === 'active') {
-            navigate(`/league/${id}/lottery`);
-          }
-        },
-      )
-      .subscribe();
-
     return () => {
       isMounted = false;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
       supabase.removeChannel(membersChannel);
-      supabase.removeChannel(leaguesChannel);
     };
   }, [id, navigate]);
 
