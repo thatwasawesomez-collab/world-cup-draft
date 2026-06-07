@@ -87,15 +87,30 @@ export const Lottery = () => {
     if (stage !== 'done' || !id || positionsSaved || shuffledMembers.length === 0) return;
 
     const saveDraftPositions = async () => {
-      const updates = shuffledMembers.map((member, index) =>
-        supabase
-          .from('league_members')
-          .update({ draft_position: index + 1 })
-          .eq('league_id', id)
-          .eq('user_id', member.user_id)
+      const results = await Promise.all(
+        shuffledMembers.map((member, index) =>
+          supabase
+            .from('league_members')
+            .update({ draft_position: index + 1 })
+            .eq('league_id', id)
+            .eq('user_id', member.user_id),
+        ),
       );
 
-      await Promise.all(updates);
+      const failures = results
+        .map((result, index) => ({ result, member: shuffledMembers[index], index }))
+        .filter(({ result }) => result.error);
+
+      if (failures.length > 0) {
+        failures.forEach(({ result, member, index }) => {
+          console.error(
+            `Failed to save draft_position ${index + 1} for ${member.username} (${member.user_id}):`,
+            result.error,
+          );
+        });
+        return;
+      }
+
       setPositionsSaved(true);
     };
 
