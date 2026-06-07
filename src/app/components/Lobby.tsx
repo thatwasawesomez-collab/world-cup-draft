@@ -66,7 +66,7 @@ export const Lobby = () => {
 
     loadLeague();
 
-    const channel = supabase
+    const membersChannel = supabase
       .channel(`league_members:${id}`)
       .on(
         'postgres_changes',
@@ -92,11 +92,31 @@ export const Lobby = () => {
       )
       .subscribe();
 
+    const leaguesChannel = supabase
+      .channel(`leagues:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'leagues',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          const updated = payload.new as { draft_status?: string };
+          if (isMounted && updated.draft_status === 'active') {
+            navigate(`/league/${id}/lottery`);
+          }
+        },
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
+      supabase.removeChannel(membersChannel);
+      supabase.removeChannel(leaguesChannel);
     };
-  }, [id]);
+  }, [id, navigate]);
 
   useEffect(() => {
     if (league?.draft_type) {
