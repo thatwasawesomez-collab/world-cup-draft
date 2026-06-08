@@ -121,13 +121,22 @@ export const Lottery = () => {
     setLoading(true);
     Promise.all([fetchLeague(id), supabase.auth.getUser()])
       .then(([{ league: fetchedLeague, members: fetchedMembers }, { data: { user } }]) => {
-        const positionsSet =
+        const allPositionsSet =
           fetchedMembers.length === fetchedLeague.max_members &&
           fetchedMembers.every((m) => m.draft_position > 0);
 
-        if (fetchedLeague.draft_status === 'active' && positionsSet) {
-          navigate(`/league/${id}/draft`);
-          return;
+        // Only skip lottery when draft is active AND lottery positions are already saved.
+        // While status is 'active' (draft just started), always show lottery — join-order
+        // draft_position values do not count as saved until host runs the lottery.
+        if (fetchedLeague.draft_status === 'active' && allPositionsSet) {
+          const lotteryPositionsSaved =
+            fetchedLeague.draft_status === 'lottery_order' ||
+            fetchedLeague.draft_status === 'lottery_complete';
+
+          if (lotteryPositionsSaved) {
+            navigate(`/league/${id}/draft`);
+            return;
+          }
         }
 
         setLeague(fetchedLeague);
@@ -296,7 +305,7 @@ export const Lottery = () => {
       });
   }, [stage, isHost, id]);
 
-  if (loading || (league && members.length !== league.max_members)) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
