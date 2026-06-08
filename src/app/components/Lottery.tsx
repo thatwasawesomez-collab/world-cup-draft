@@ -121,22 +121,18 @@ export const Lottery = () => {
     setLoading(true);
     Promise.all([fetchLeague(id), supabase.auth.getUser()])
       .then(([{ league: fetchedLeague, members: fetchedMembers }, { data: { user } }]) => {
+        if (fetchedLeague.draft_status !== 'active') {
+          navigate(`/league/${id}`);
+          return;
+        }
+
         const allPositionsSet =
           fetchedMembers.length === fetchedLeague.max_members &&
           fetchedMembers.every((m) => m.draft_position > 0);
 
-        // Only skip lottery when draft is active AND lottery positions are already saved.
-        // While status is 'active' (draft just started), always show lottery — join-order
-        // draft_position values do not count as saved until host runs the lottery.
-        if (fetchedLeague.draft_status === 'active' && allPositionsSet) {
-          const lotteryPositionsSaved =
-            fetchedLeague.draft_status === 'lottery_order' ||
-            fetchedLeague.draft_status === 'lottery_complete';
-
-          if (lotteryPositionsSaved) {
-            navigate(`/league/${id}/draft`);
-            return;
-          }
+        if (allPositionsSet) {
+          navigate(`/league/${id}/draft`);
+          return;
         }
 
         setLeague(fetchedLeague);

@@ -32,12 +32,20 @@ export const Lobby = () => {
     let isMounted = true;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-    const navigateForActiveDraft = (fetchedLeague: League, fetchedMembers: LeagueMember[]) => {
-      const positionsSet =
-        fetchedMembers.length === fetchedLeague.max_members &&
-        fetchedMembers.every((m) => m.draft_position > 0);
+    const redirectForDraftStatus = (fetchedLeague: League, fetchedMembers: LeagueMember[]) => {
+      if (fetchedLeague.draft_status === 'pending') {
+        return;
+      }
 
-      navigate(positionsSet ? `/league/${id}/draft` : `/league/${id}/lottery`);
+      if (fetchedLeague.draft_status === 'active') {
+        const allPositionsSet =
+          fetchedMembers.length === fetchedLeague.max_members &&
+          fetchedMembers.every((m) => m.draft_position > 0);
+
+        navigate(
+          allPositionsSet ? `/league/${id}/draft` : `/league/${id}/lottery`,
+        );
+      }
     };
 
     const pollDraftStatus = async () => {
@@ -50,7 +58,7 @@ export const Lobby = () => {
             clearInterval(pollInterval);
             pollInterval = null;
           }
-          navigateForActiveDraft(data.league, data.members);
+          redirectForDraftStatus(data.league, data.members);
         }
       } catch (err) {
         if (isMounted) {
@@ -82,9 +90,9 @@ export const Lobby = () => {
         setLeague(data.league);
         setMembers(data.members);
 
-        if (data.league.draft_status === 'active') {
-          navigateForActiveDraft(data.league, data.members);
-        } else if (!pollInterval) {
+        redirectForDraftStatus(data.league, data.members);
+
+        if (data.league.draft_status !== 'active' && !pollInterval) {
           pollInterval = setInterval(pollDraftStatus, 3000);
         }
       } catch (err) {
@@ -116,6 +124,7 @@ export const Lobby = () => {
             if (isMounted) {
               setLeague(data.league);
               setMembers(data.members);
+              redirectForDraftStatus(data.league, data.members);
             }
           } catch (err) {
             if (isMounted) {

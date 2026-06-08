@@ -55,12 +55,26 @@ export const DraftRoom = () => {
     if (!leagueId) return;
 
     fetchLeague(leagueId)
-      .then(({ league: fetchedLeague }) => {
+      .then(({ league: fetchedLeague, members: fetchedMembers }) => {
+        const allPositionsSet =
+          fetchedMembers.length === fetchedLeague.max_members &&
+          fetchedMembers.every((m) => m.draft_position > 0);
+
+        if (fetchedLeague.draft_status === 'pending') {
+          navigate(`/league/${leagueId}`);
+          return;
+        }
+
+        if (fetchedLeague.draft_status === 'active' && !allPositionsSet) {
+          navigate(`/league/${leagueId}/lottery`);
+          return;
+        }
+
         setLeague(fetchedLeague);
         setDraftType(fetchedLeague.draft_type);
       })
       .catch(() => {});
-  }, [leagueId]);
+  }, [leagueId, navigate]);
 
   useEffect(() => {
     if (isDraftComplete || draftType === 'untimed') return;
