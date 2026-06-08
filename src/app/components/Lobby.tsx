@@ -32,6 +32,14 @@ export const Lobby = () => {
     let isMounted = true;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+    const navigateForActiveDraft = (fetchedLeague: League, fetchedMembers: LeagueMember[]) => {
+      const positionsSet =
+        fetchedMembers.length === fetchedLeague.max_members &&
+        fetchedMembers.every((m) => m.draft_position > 0);
+
+      navigate(positionsSet ? `/league/${id}/draft` : `/league/${id}/lottery`);
+    };
+
     const pollDraftStatus = async () => {
       try {
         const data = await fetchLeague(id);
@@ -42,7 +50,7 @@ export const Lobby = () => {
             clearInterval(pollInterval);
             pollInterval = null;
           }
-          navigate(`/league/${id}/lottery`);
+          navigateForActiveDraft(data.league, data.members);
         }
       } catch (err) {
         if (isMounted) {
@@ -75,7 +83,7 @@ export const Lobby = () => {
         setMembers(data.members);
 
         if (data.league.draft_status === 'active') {
-          navigate(`/league/${id}/lottery`);
+          navigateForActiveDraft(data.league, data.members);
         } else if (!pollInterval) {
           pollInterval = setInterval(pollDraftStatus, 3000);
         }

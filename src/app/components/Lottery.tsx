@@ -121,6 +121,15 @@ export const Lottery = () => {
     setLoading(true);
     Promise.all([fetchLeague(id), supabase.auth.getUser()])
       .then(([{ league: fetchedLeague, members: fetchedMembers }, { data: { user } }]) => {
+        const positionsSet =
+          fetchedMembers.length === fetchedLeague.max_members &&
+          fetchedMembers.every((m) => m.draft_position > 0);
+
+        if (fetchedLeague.draft_status === 'active' && positionsSet) {
+          navigate(`/league/${id}/draft`);
+          return;
+        }
+
         setLeague(fetchedLeague);
         setMembers(fetchedMembers);
         setShuffledMembers(fetchedMembers);
@@ -147,7 +156,7 @@ export const Lottery = () => {
         }
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, navigate]);
 
   useEffect(() => {
     if (!id || loading) return;
@@ -191,13 +200,6 @@ export const Lottery = () => {
       clearInterval(pollInterval);
     };
   }, [id, loading, handleLotteryStatus]);
-
-  useEffect(() => {
-    if (loading) return;
-    if (league && members.length !== league.max_members) {
-      navigate(`/`);
-    }
-  }, [loading, league, members, navigate]);
 
   const handleStartLottery = async () => {
     if (!id) return;
@@ -294,7 +296,7 @@ export const Lottery = () => {
       });
   }, [stage, isHost, id]);
 
-  if (loading) {
+  if (loading || (league && members.length !== league.max_members)) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
