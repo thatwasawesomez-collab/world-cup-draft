@@ -175,26 +175,20 @@ export const Lottery = () => {
           }
         },
       )
-      .subscribe();
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const { league: fetchedLeague } = await fetchLeague(id);
-        if (
-          fetchedLeague.draft_status === 'lottery' ||
-          fetchedLeague.draft_status === 'lottery_order' ||
-          fetchedLeague.draft_status === 'lottery_complete'
-        ) {
-          await handleLotteryStatus(fetchedLeague.draft_status);
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          fetchLeague(id)
+            .then(({ league: fetchedLeague }) => {
+              if (fetchedLeague.draft_status) {
+                return handleLotteryStatus(fetchedLeague.draft_status);
+              }
+            })
+            .catch(() => {});
         }
-      } catch {
-        // polling is a fallback for realtime
-      }
-    }, 2000);
+      });
 
     return () => {
       supabase.removeChannel(leaguesChannel);
-      clearInterval(pollInterval);
     };
   }, [id, loading, handleLotteryStatus]);
 

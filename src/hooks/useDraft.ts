@@ -4,7 +4,6 @@ import { getCurrentPicker, initDraft, isDraftComplete } from '../lib/draftServic
 import type { DraftPick, DraftState, LeagueMember } from '../types/index';
 
 const TOTAL_TEAMS = 48;
-const POLL_INTERVAL_MS = 2000;
 
 type DraftPickRow = {
   id: string;
@@ -250,10 +249,6 @@ export function useDraft(leagueId: string) {
         }
       });
 
-    const pollInterval = setInterval(() => {
-      refreshDraft();
-    }, POLL_INTERVAL_MS);
-
     const handleReconnect = () => {
       refreshDraft();
     };
@@ -267,7 +262,6 @@ export function useDraft(leagueId: string) {
 
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
       window.removeEventListener('online', handleReconnect);
       supabase.removeChannel(channel);
     };

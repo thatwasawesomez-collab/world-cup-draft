@@ -31,7 +31,6 @@ export const Lobby = () => {
     if (!id) return;
 
     let isMounted = true;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
     const redirectForDraftStatus = (fetchedLeague: League) => {
       if (fetchedLeague.draft_status === 'pending') {
@@ -40,25 +39,6 @@ export const Lobby = () => {
 
       if (isLotteryPhase(fetchedLeague.draft_status)) {
         navigate(`/league/${id}/lottery`);
-      }
-    };
-
-    const pollDraftStatus = async () => {
-      try {
-        const data = await fetchLeague(id);
-        if (!isMounted) return;
-
-        if (isLotteryPhase(data.league.draft_status)) {
-          if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-          }
-          redirectForDraftStatus(data.league);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Failed to check draft status');
-        }
       }
     };
 
@@ -86,10 +66,6 @@ export const Lobby = () => {
         setMembers(data.members);
 
         redirectForDraftStatus(data.league);
-
-        if (!isLotteryPhase(data.league.draft_status) && !pollInterval) {
-          pollInterval = setInterval(pollDraftStatus, 3000);
-        }
       } catch (err) {
         if (isMounted) {
           setError(err instanceof Error ? err.message : 'Failed to load league');
@@ -130,12 +106,36 @@ export const Lobby = () => {
       )
       .subscribe();
 
+    const leaguesChannel = supabase
+      .channel(`leagues:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'leagues',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          const updated = payload.new as Partial<League>;
+          if (!isMounted) return;
+
+          setLeague((prev) => {
+            if (!prev) return prev;
+            const next = { ...prev, ...updated };
+            if (updated.draft_status) {
+              redirectForDraftStatus(next);
+            }
+            return next;
+          });
+        },
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
-      if (pollInterval) {
-        clearInterval(pollInterval);
-      }
       supabase.removeChannel(membersChannel);
+      supabase.removeChannel(leaguesChannel);
     };
   }, [id, navigate]);
 
