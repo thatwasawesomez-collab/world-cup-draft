@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { createLeague } from '../../hooks/useLeague';
 import type { DraftType } from '../../types/index';
 import { Auth } from './Auth';
+import { JoinLeague } from './JoinLeague';
 
 export const Home = () => {
   const navigate = useNavigate();
@@ -79,6 +80,16 @@ export const Home = () => {
         <p className="text-xl text-neutral-400 max-w-2xl mx-auto">
           Create your own league, invite {leagueSize - 1} friends, and draft the ultimate World Cup roster. Will your teams take you to glory?
         </p>
+
+        <div className="max-w-md mx-auto w-full mb-8">
+          <JoinLeague variant="embedded" />
+        </div>
+
+        <div className="max-w-md mx-auto flex items-center gap-4 py-2">
+          <div className="flex-1 h-px bg-neutral-800" />
+          <span className="text-neutral-500 text-sm font-semibold uppercase tracking-wider">or create a league</span>
+          <div className="flex-1 h-px bg-neutral-800" />
+        </div>
 
         <div className="max-w-md mx-auto space-y-4 py-4">
           <div className="flex flex-col gap-2 text-left">

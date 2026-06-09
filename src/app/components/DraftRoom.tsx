@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { TEAMS } from '../store';
 import { useDraft } from '../../hooks/useDraft';
 import { fetchLeague } from '../../hooks/useLeague';
+import { isLotteryComplete, isLotteryPhase } from '../../lib/leagueFlow';
 import type { DraftType, League } from '../../types/index';
 import { Clock, Users, Trophy, Loader2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
@@ -55,17 +56,16 @@ export const DraftRoom = () => {
     if (!leagueId) return;
 
     fetchLeague(leagueId)
-      .then(({ league: fetchedLeague, members: fetchedMembers }) => {
-        const allPositionsSet =
-          fetchedMembers.length === fetchedLeague.max_members &&
-          fetchedMembers.every((m) => m.draft_position > 0);
-
+      .then(({ league: fetchedLeague }) => {
         if (fetchedLeague.draft_status === 'pending') {
           navigate(`/league/${leagueId}`);
           return;
         }
 
-        if (fetchedLeague.draft_status === 'active' && !allPositionsSet) {
+        if (
+          isLotteryPhase(fetchedLeague.draft_status) &&
+          !isLotteryComplete(fetchedLeague.draft_status)
+        ) {
           navigate(`/league/${leagueId}/lottery`);
           return;
         }

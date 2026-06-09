@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useStore, DraftType } from '../store';
 import { joinLeague, fetchLeague } from '../../hooks/useLeague';
+import { isLotteryPhase } from '../../lib/leagueFlow';
 import { supabase } from '../../lib/supabase';
 import type { League, LeagueMember } from '../../types/index';
 import { Share2, Users, Settings2, Play, UserPlus, Copy, Check, Loader2 } from 'lucide-react';
@@ -32,19 +33,13 @@ export const Lobby = () => {
     let isMounted = true;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-    const redirectForDraftStatus = (fetchedLeague: League, fetchedMembers: LeagueMember[]) => {
+    const redirectForDraftStatus = (fetchedLeague: League) => {
       if (fetchedLeague.draft_status === 'pending') {
         return;
       }
 
-      if (fetchedLeague.draft_status === 'active') {
-        const allPositionsSet =
-          fetchedMembers.length === fetchedLeague.max_members &&
-          fetchedMembers.every((m) => m.draft_position > 0);
-
-        navigate(
-          allPositionsSet ? `/league/${id}/draft` : `/league/${id}/lottery`,
-        );
+      if (isLotteryPhase(fetchedLeague.draft_status)) {
+        navigate(`/league/${id}/lottery`);
       }
     };
 
@@ -53,12 +48,12 @@ export const Lobby = () => {
         const data = await fetchLeague(id);
         if (!isMounted) return;
 
-        if (data.league.draft_status === 'active') {
+        if (isLotteryPhase(data.league.draft_status)) {
           if (pollInterval) {
             clearInterval(pollInterval);
             pollInterval = null;
           }
-          redirectForDraftStatus(data.league, data.members);
+          redirectForDraftStatus(data.league);
         }
       } catch (err) {
         if (isMounted) {
@@ -90,9 +85,9 @@ export const Lobby = () => {
         setLeague(data.league);
         setMembers(data.members);
 
-        redirectForDraftStatus(data.league, data.members);
+        redirectForDraftStatus(data.league);
 
-        if (data.league.draft_status !== 'active' && !pollInterval) {
+        if (!isLotteryPhase(data.league.draft_status) && !pollInterval) {
           pollInterval = setInterval(pollDraftStatus, 3000);
         }
       } catch (err) {
@@ -124,7 +119,7 @@ export const Lobby = () => {
             if (isMounted) {
               setLeague(data.league);
               setMembers(data.members);
-              redirectForDraftStatus(data.league, data.members);
+              redirectForDraftStatus(data.league);
             }
           } catch (err) {
             if (isMounted) {
@@ -190,6 +185,22 @@ export const Lobby = () => {
 
   const handleStartDraft = async () => {
     if (!id || !isFull) return;
+
+    const resetResults = await Promise.all(
+      members.map((member) =>
+        supabase
+          .from('league_members')
+          .update({ draft_position: 0 })
+          .eq('league_id', id)
+          .eq('user_id', member.user_id),
+      ),
+    );
+
+    const resetFailed = resetResults.find((result) => result.error);
+    if (resetFailed?.error) {
+      setError(`Failed to reset draft positions: ${resetFailed.error.message}`);
+      return;
+    }
 
     const { error: updateError } = await supabase
       .from('leagues')

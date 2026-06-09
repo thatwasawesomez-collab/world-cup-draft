@@ -80,7 +80,7 @@ export async function createLeague(
     .insert({
       league_id: league.id,
       user_id: user.id,
-      draft_position: 1,
+      draft_position: 0,
     });
 
   if (memberError) {
@@ -88,6 +88,41 @@ export async function createLeague(
   }
 
   return league as League;
+}
+
+export function parseLeagueInput(
+  input: string,
+): { type: 'id'; value: string } | { type: 'invite_code'; value: string } | null {
+  const trimmed = input.trim();
+
+  const urlMatch = trimmed.match(/\/league\/([a-f0-9-]+)/i);
+  if (urlMatch) {
+    return { type: 'id', value: urlMatch[1] };
+  }
+
+  const uuidMatch = trimmed.match(
+    /^([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i,
+  );
+  if (uuidMatch) {
+    return { type: 'id', value: uuidMatch[1] };
+  }
+
+  if (/^[A-Za-z0-9]{6}$/.test(trimmed)) {
+    return { type: 'invite_code', value: trimmed };
+  }
+
+  return null;
+}
+
+export async function joinLeagueById(leagueId: string): Promise<League> {
+  const user = await getAuthenticatedUser();
+  const { league, members } = await fetchLeague(leagueId);
+
+  if (members.some((m) => m.user_id === user.id)) {
+    return league;
+  }
+
+  return joinLeague(league.invite_code);
 }
 
 export async function joinLeague(inviteCode: string): Promise<League> {
@@ -135,26 +170,12 @@ export async function joinLeague(inviteCode: string): Promise<League> {
     throw new Error('You are already in this league');
   }
 
-  const { data: lastMember, error: positionError } = await supabase
-    .from('league_members')
-    .select('draft_position')
-    .eq('league_id', league.id)
-    .order('draft_position', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (positionError) {
-    throw new Error(`Failed to determine draft position: ${positionError.message}`);
-  }
-
-  const nextDraftPosition = (lastMember?.draft_position ?? 0) + 1;
-
   const { error: joinError } = await supabase
     .from('league_members')
     .insert({
       league_id: league.id,
       user_id: user.id,
-      draft_position: nextDraftPosition,
+      draft_position: 0,
     });
 
   if (joinError) {

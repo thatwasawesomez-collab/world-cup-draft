@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { createBrowserRouter, Navigate, Outlet } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
+import { PENDING_LEAGUE_PATH_KEY } from './components/JoinLeague';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Home } from './components/Home';
@@ -9,6 +10,7 @@ import { DraftRoom } from './components/DraftRoom';
 import { LeagueDashboard } from './components/LeagueDashboard';
 
 function ProtectedRoute() {
+  const location = useLocation();
   const [checking, setChecking] = useState(true);
   const [hasSession, setHasSession] = useState(false);
 
@@ -36,6 +38,7 @@ function ProtectedRoute() {
   }
 
   if (!hasSession) {
+    sessionStorage.setItem(PENDING_LEAGUE_PATH_KEY, location.pathname);
     return <Navigate to="/" replace />;
   }
 

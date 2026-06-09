@@ -14,6 +14,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { JoinLeague } from './JoinLeague';
 
 const COLORS = [
   'bg-red-500',
@@ -57,6 +58,7 @@ export const Auth = ({ onComplete }: AuthProps) => {
   const [selectedColor, setSelectedColor] = useState<string>(COLORS[0]);
   const [selectedIcon, setSelectedIcon] = useState<IconName>(ICONS[0]);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [authStep, setAuthStep] = useState<'profile' | 'join'>('profile');
 
   const checkProfile = async (session: Session | null) => {
     if (!session?.user) {
@@ -144,7 +146,7 @@ export const Auth = ({ onComplete }: AuthProps) => {
       return;
     }
 
-    onComplete();
+    setAuthStep('join');
   };
 
   if (checkingProfile) {
@@ -153,6 +155,10 @@ export const Auth = ({ onComplete }: AuthProps) => {
         <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
       </div>
     );
+  }
+
+  if (user && authStep === 'join') {
+    return <JoinLeague showSkip onSkip={onComplete} />;
   }
 
   if (user) {

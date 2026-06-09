@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { fetchLeague } from '../../hooks/useLeague';
+import { isLotteryPhase } from '../../lib/leagueFlow';
 import { supabase } from '../../lib/supabase';
 import type { League, LeagueMember } from '../../types/index';
 import { motion, AnimatePresence } from 'motion/react';
@@ -121,17 +122,8 @@ export const Lottery = () => {
     setLoading(true);
     Promise.all([fetchLeague(id), supabase.auth.getUser()])
       .then(([{ league: fetchedLeague, members: fetchedMembers }, { data: { user } }]) => {
-        if (fetchedLeague.draft_status !== 'active') {
+        if (!isLotteryPhase(fetchedLeague.draft_status)) {
           navigate(`/league/${id}`);
-          return;
-        }
-
-        const allPositionsSet =
-          fetchedMembers.length === fetchedLeague.max_members &&
-          fetchedMembers.every((m) => m.draft_position > 0);
-
-        if (allPositionsSet) {
-          navigate(`/league/${id}/draft`);
           return;
         }
 
