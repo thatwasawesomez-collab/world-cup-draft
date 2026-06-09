@@ -4,8 +4,8 @@ import { TEAMS } from '../store';
 import { useDraft } from '../../hooks/useDraft';
 import { fetchLeague } from '../../hooks/useLeague';
 import { isLotteryComplete, isLotteryPhase } from '../../lib/leagueFlow';
-import type { DraftType, League } from '../../types/index';
-import { Clock, Users, Trophy, Loader2 } from 'lucide-react';
+import type { DraftType, League, LeagueMember } from '../../types/index';
+import { ChevronDown, Clock, Users, Trophy, Loader2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import confetti from 'canvas-confetti';
 
@@ -31,6 +31,7 @@ export const DraftRoom = () => {
   const [picking, setPicking] = useState(false);
   const [pickingTeamId, setPickingTeamId] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [expandedPreviousRounds, setExpandedPreviousRounds] = useState<Set<number>>(new Set());
   const autoPickAttemptedRef = useRef<number | null>(null);
 
   const TOTAL_PICKS = 48;
@@ -51,6 +52,32 @@ export const DraftRoom = () => {
     TEAMS.filter((t) => t.group === group && !pickedTeamIds.has(t.id)).length;
 
   const rankedTeams = [...TEAMS].sort((a, b) => a.fifaRanking - b.fifaRanking);
+
+  const currentRound = draftState?.current_round ?? 1;
+
+  const getPickForMember = useCallback((round: number, member: LeagueMember) => {
+    const count = members.length;
+    if (count === 0) return undefined;
+    const isReverse = round % 2 === 0;
+    const pos = member.draft_position - 1;
+    const idx = isReverse ? count - 1 - pos : pos;
+    const pickNumber = (round - 1) * count + idx + 1;
+    return picks.find((p) => p.pickNumber === pickNumber);
+  }, [members, picks]);
+
+  const getMembersInRoundOrder = useCallback((round: number) => {
+    const sorted = [...members].sort((a, b) => a.draft_position - b.draft_position);
+    return round % 2 === 0 ? [...sorted].reverse() : sorted;
+  }, [members]);
+
+  const currentRoundPickedCount = getMembersInRoundOrder(currentRound)
+    .map((member) => getPickForMember(currentRound, member))
+    .filter(Boolean).length;
+
+  const previousRounds = Array.from(
+    { length: Math.max(0, currentRound - 1) },
+    (_, i) => currentRound - 1 - i,
+  );
 
   useEffect(() => {
     if (!leagueId) return;
@@ -165,15 +192,6 @@ export const DraftRoom = () => {
       confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
     }
   }, [isDraftComplete]);
-
-  useEffect(() => {
-    if (isDraftComplete && leagueId) {
-      const timeout = setTimeout(() => {
-        navigate(`/league/${leagueId}/dashboard`);
-      }, 3000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isDraftComplete, leagueId, navigate]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -429,100 +447,153 @@ export const DraftRoom = () => {
             </h2>
           </div>
 
-          <div className="flex-1 overflow-y-auto overflow-x-auto p-4 flex lg:flex-col gap-4 custom-scrollbar">
-            {[...members]
-              .sort((a, b) => a.draft_position - b.draft_position)
-              .map((member) => {
-                const memberPickNumbers = Array.from({ length: PICKS_PER_PLAYER }, (_, i) => {
-                  const round = i + 1;
-                  const isReverse = round % 2 === 0;
-                  const positionInRound = isReverse
-                    ? memberCount - member.draft_position
-                    : member.draft_position - 1;
-                  return round * memberCount - (isReverse ? positionInRound : memberCount - 1 - positionInRound);
-                });
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-sm">Round {currentRound}</h3>
+                <span className="text-xs font-semibold text-emerald-500 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                  {currentRoundPickedCount} of {memberCount} picked
+                </span>
+              </div>
 
-                const nextUnpicked = memberPickNumbers.find(
-                  (pickNum) => !picks.some((p) => p.pickNumber === pickNum),
-                );
-                const isActiveMember = member.user_id === draftState?.current_user_id;
+              <div className="space-y-2">
+                {getMembersInRoundOrder(currentRound).map((member) => {
+                  const pick = getPickForMember(currentRound, member);
+                  const team = pick ? TEAMS.find((t) => t.id === pick.teamId) : null;
+                  const isOnClock = !pick && member.user_id === draftState?.current_user_id && !isDraftComplete;
 
-                return (
-                  <div
-                    key={member.user_id}
-                    className={twMerge(
-                      'rounded-xl border p-4 transition-all duration-300 min-w-[280px] lg:min-w-0 flex-shrink-0 bg-neutral-950/50',
-                      isActiveMember && !isDraftComplete
-                        ? 'border-emerald-500/50'
-                        : 'border-neutral-800',
-                    )}
-                  >
-                    <div className="flex items-center gap-3 mb-3">
+                  return (
+                    <div
+                      key={member.user_id}
+                      className={twMerge(
+                        'rounded-lg border px-3 py-2 flex items-center gap-3 transition-all',
+                        isOnClock
+                          ? 'border-emerald-500/50 bg-emerald-500/10'
+                          : 'border-neutral-800 bg-neutral-950/50',
+                        !pick && !isOnClock && 'opacity-40',
+                      )}
+                    >
                       <div className={twMerge(
                         'w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0',
                         member.color,
                       )}>
                         {member.username.charAt(0).toUpperCase()}
                       </div>
-                      <div className="min-w-0">
-                        <span className="font-bold block truncate">{member.username}</span>
-                        {nextUnpicked && !isDraftComplete ? (
-                          <span className="text-xs text-emerald-500 font-medium">Pick #{nextUnpicked}</span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-sm font-semibold block truncate">{member.username}</span>
+                        {pick && team ? (
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <img
+                              src={`https://flagcdn.com/w20/${team.flagCode}.png`}
+                              className="w-4 h-3 object-cover rounded-sm shrink-0"
+                              alt=""
+                            />
+                            <span className="text-xs font-medium truncate">{team.name}</span>
+                          </div>
+                        ) : isOnClock ? (
+                          <span className="text-xs text-emerald-500 animate-pulse">On the clock...</span>
                         ) : (
-                          <span className="text-xs text-neutral-500 font-medium">Complete</span>
+                          <span className="text-xs text-neutral-600">Waiting...</span>
                         )}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                    <div className="space-y-2">
-                      {memberPickNumbers.map((pickNum, slotIndex) => {
-                        const round = slotIndex + 1;
-                        const pick = picks.find((p) => p.pickNumber === pickNum);
-                        const team = pick ? TEAMS.find((t) => t.id === pick.teamId) : null;
-                        const isCurrentSlot = pickNum === draftState?.current_pick && !isDraftComplete;
+            {previousRounds.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold mb-2">
+                  Previous rounds
+                </p>
+                <div className="space-y-2">
+                  {previousRounds.map((round) => {
+                    const roundMembers = getMembersInRoundOrder(round);
+                    const roundPickCount = roundMembers
+                      .map((m) => getPickForMember(round, m))
+                      .filter(Boolean).length;
+                    const isExpanded = expandedPreviousRounds.has(round);
 
-                        if (pick && team) {
-                          return (
-                            <div
-                              key={pickNum}
-                              className="h-8 rounded flex items-center px-2 text-xs font-semibold overflow-hidden whitespace-nowrap bg-neutral-900 border border-neutral-800 border-l-2 border-l-emerald-500"
-                            >
-                              <div className="flex items-center gap-2 w-full">
-                                <img src={`https://flagcdn.com/w20/${team.flagCode}.png`} className="w-4 h-3 object-cover rounded-sm shrink-0" alt="" />
-                                <span className="truncate">{team.name}</span>
+                    return (
+                      <div key={round} className="rounded-lg border border-neutral-800 bg-neutral-950/50 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedPreviousRounds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(round)) next.delete(round);
+                              else next.add(round);
+                              return next;
+                            });
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-neutral-900/50 transition-colors text-left"
+                        >
+                          <span className="text-xs font-semibold text-neutral-300 shrink-0">
+                            Round {round} — {roundPickCount} picks
+                          </span>
+                          <div className="flex -space-x-1.5 flex-1 justify-end mr-1">
+                            {roundMembers.map((member) => (
+                              <div
+                                key={member.user_id}
+                                className={twMerge(
+                                  'w-5 h-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold border border-neutral-900',
+                                  member.color,
+                                )}
+                              >
+                                {member.username.charAt(0).toUpperCase()}
                               </div>
-                            </div>
-                          );
-                        }
-
-                        if (isCurrentSlot) {
-                          return (
-                            <div
-                              key={pickNum}
-                              className="h-8 rounded flex items-center px-2 text-xs font-semibold bg-neutral-900 border border-neutral-800"
-                            >
-                              {isActiveMember ? (
-                                <span className="text-emerald-500 animate-pulse">On the clock...</span>
-                              ) : (
-                                <span className="text-neutral-500">Waiting...</span>
-                              )}
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <div
-                            key={pickNum}
-                            className="h-8 rounded flex items-center px-2 text-xs text-neutral-700 bg-neutral-900/30 border border-dashed border-neutral-800"
-                          >
-                            Round {round} pick
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+                          <ChevronDown
+                            className={twMerge(
+                              'w-4 h-4 text-neutral-500 shrink-0 transition-transform',
+                              isExpanded && 'rotate-180',
+                            )}
+                          />
+                        </button>
+
+                        {isExpanded && (
+                          <div className="px-3 pb-3 space-y-2 border-t border-neutral-800 pt-2">
+                            {roundMembers.map((member) => {
+                              const pick = getPickForMember(round, member);
+                              const team = pick ? TEAMS.find((t) => t.id === pick.teamId) : null;
+
+                              return (
+                                <div
+                                  key={member.user_id}
+                                  className="rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-2 flex items-center gap-3"
+                                >
+                                  <div className={twMerge(
+                                    'w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0',
+                                    member.color,
+                                  )}>
+                                    {member.username.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-sm font-semibold block truncate">{member.username}</span>
+                                    {pick && team && (
+                                      <div className="flex items-center gap-2 mt-0.5">
+                                        <img
+                                          src={`https://flagcdn.com/w20/${team.flagCode}.png`}
+                                          className="w-4 h-3 object-cover rounded-sm shrink-0"
+                                          alt=""
+                                        />
+                                        <span className="text-xs font-medium truncate">{team.name}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </aside>
       </div>
