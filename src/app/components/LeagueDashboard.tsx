@@ -454,7 +454,7 @@ export const LeagueDashboard = () => {
                 activeTab === 'roster' ? "bg-neutral-800 text-emerald-500 shadow-sm" : "text-neutral-400 hover:text-white"
               )}
             >
-              My Teams
+              Teams
             </button>
             <button
               onClick={() => setActiveTab('schedule')}
@@ -773,7 +773,7 @@ export const LeagueDashboard = () => {
                                   <span className="text-neutral-400 text-sm">{formatMatchTime(match.match_date)}</span>
                                 )}
                                 {isRivalry && (
-                                  <span className="text-[10px] text-emerald-500">⚔ Rivalry</span>
+                                  <span className="text-[10px] text-emerald-500">Rivalry</span>
                                 )}
                               </div>
 

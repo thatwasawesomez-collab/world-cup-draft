@@ -430,53 +430,99 @@ export const DraftRoom = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto overflow-x-auto p-4 flex lg:flex-col gap-4 custom-scrollbar">
-            {Array.from({ length: PICKS_PER_PLAYER }, (_, roundIndex) => {
-              const round = roundIndex + 1;
-              const roundPicks = picks
-                .filter((p) => memberCount > 0 && Math.ceil(p.pickNumber / memberCount) === round)
-                .sort((a, b) => a.pickNumber - b.pickNumber);
+            {[...members]
+              .sort((a, b) => a.draft_position - b.draft_position)
+              .map((member) => {
+                const memberPickNumbers = Array.from({ length: PICKS_PER_PLAYER }, (_, i) => {
+                  const round = i + 1;
+                  const isReverse = round % 2 === 0;
+                  const positionInRound = isReverse
+                    ? memberCount - member.draft_position
+                    : member.draft_position - 1;
+                  return round * memberCount - (isReverse ? positionInRound : memberCount - 1 - positionInRound);
+                });
 
-              return (
-                <div
-                  key={round}
-                  className="rounded-xl border p-4 transition-all duration-300 min-w-[280px] lg:min-w-0 flex-shrink-0 bg-neutral-950/50 border-neutral-800"
-                >
-                  <div className="mb-4">
-                    <span className="font-bold block leading-none">Round {round}</span>
-                    <span className="text-xs text-neutral-500 font-medium">{roundPicks.length} picks</span>
-                  </div>
+                const nextUnpicked = memberPickNumbers.find(
+                  (pickNum) => !picks.some((p) => p.pickNumber === pickNum),
+                );
+                const isActiveMember = member.user_id === draftState?.current_user_id;
 
-                  <div className="space-y-2">
-                    {roundPicks.map((pick) => {
-                      const member = members.find((m) => m.user_id === pick.playerId);
-                      const team = TEAMS.find((t) => t.id === pick.teamId);
-
-                      return (
-                        <div
-                          key={pick.pickNumber}
-                          className="h-8 rounded flex items-center px-2 text-xs font-semibold overflow-hidden whitespace-nowrap bg-neutral-900 border border-neutral-800"
-                        >
-                          {team && member ? (
-                            <div className="flex items-center gap-2 w-full">
-                              <img src={`https://flagcdn.com/w20/${team.flagCode}.png`} className="w-4 h-3 object-cover rounded-sm" alt="" />
-                              <span className="truncate">{member.username}</span>
-                              <span className="truncate text-neutral-400">• {team.name}</span>
-                            </div>
-                          ) : (
-                            `Pick #${pick.pickNumber}`
-                          )}
-                        </div>
-                      );
-                    })}
-                    {roundPicks.length === 0 && (
-                      <div className="h-8 rounded flex items-center px-2 text-xs text-neutral-600 bg-neutral-900/30 border border-dashed border-neutral-800">
-                        No picks yet
-                      </div>
+                return (
+                  <div
+                    key={member.user_id}
+                    className={twMerge(
+                      'rounded-xl border p-4 transition-all duration-300 min-w-[280px] lg:min-w-0 flex-shrink-0 bg-neutral-950/50',
+                      isActiveMember && !isDraftComplete
+                        ? 'border-emerald-500/50'
+                        : 'border-neutral-800',
                     )}
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={twMerge(
+                        'w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0',
+                        member.color,
+                      )}>
+                        {member.username.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="font-bold block truncate">{member.username}</span>
+                        {nextUnpicked && !isDraftComplete ? (
+                          <span className="text-xs text-emerald-500 font-medium">Pick #{nextUnpicked}</span>
+                        ) : (
+                          <span className="text-xs text-neutral-500 font-medium">Complete</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {memberPickNumbers.map((pickNum, slotIndex) => {
+                        const round = slotIndex + 1;
+                        const pick = picks.find((p) => p.pickNumber === pickNum);
+                        const team = pick ? TEAMS.find((t) => t.id === pick.teamId) : null;
+                        const isCurrentSlot = pickNum === draftState?.current_pick && !isDraftComplete;
+
+                        if (pick && team) {
+                          return (
+                            <div
+                              key={pickNum}
+                              className="h-8 rounded flex items-center px-2 text-xs font-semibold overflow-hidden whitespace-nowrap bg-neutral-900 border border-neutral-800 border-l-2 border-l-emerald-500"
+                            >
+                              <div className="flex items-center gap-2 w-full">
+                                <img src={`https://flagcdn.com/w20/${team.flagCode}.png`} className="w-4 h-3 object-cover rounded-sm shrink-0" alt="" />
+                                <span className="truncate">{team.name}</span>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (isCurrentSlot) {
+                          return (
+                            <div
+                              key={pickNum}
+                              className="h-8 rounded flex items-center px-2 text-xs font-semibold bg-neutral-900 border border-neutral-800"
+                            >
+                              {isActiveMember ? (
+                                <span className="text-emerald-500 animate-pulse">On the clock...</span>
+                              ) : (
+                                <span className="text-neutral-500">Waiting...</span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={pickNum}
+                            className="h-8 rounded flex items-center px-2 text-xs text-neutral-700 bg-neutral-900/30 border border-dashed border-neutral-800"
+                          >
+                            Round {round} pick
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </aside>
       </div>
