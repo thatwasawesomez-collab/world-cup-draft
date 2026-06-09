@@ -6,7 +6,7 @@ import { useSchedule } from '../../hooks/useSchedule';
 import { calculatePoints } from '../../lib/pointsService';
 import { supabase } from '../../lib/supabase';
 import type { DraftPick, League, LeagueMember, Match } from '../../types/index';
-import { Trophy, Calendar, Clock, Star, Medal, TrendingUp, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Trophy, Calendar, Clock, Star, Medal, TrendingUp, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 
 type DraftPickRow = {
@@ -309,7 +309,7 @@ export const LeagueDashboard = () => {
 
   const getLocalDateKey = (date: Date) => date.toLocaleDateString('en-CA');
 
-  const currentUserTeams = useMemo(() => {
+  const rosterTeams = useMemo(() => {
     const safeMatches = scheduleMatches.filter((m) =>
       m != null &&
       m.home_team != null &&
@@ -318,8 +318,8 @@ export const LeagueDashboard = () => {
       typeof m.away_team === 'string',
     );
 
-    const myPicks = schedulePicks.filter((p) => p.playerId === currentUserId);
-    return myPicks
+    const playerPicks = schedulePicks.filter((p) => p.playerId === selectedPlayerId);
+    return playerPicks
       .map((pick) => {
         const team = TEAMS.find((t) => t.id === pick.teamId);
         if (!team) return null;
@@ -339,7 +339,9 @@ export const LeagueDashboard = () => {
         return { team, matches: teamMatches };
       })
       .filter(Boolean) as { team: (typeof TEAMS)[number]; matches: Match[] }[];
-  }, [schedulePicks, scheduleMatches, currentUserId]);
+  }, [schedulePicks, scheduleMatches, selectedPlayerId]);
+
+  const rosterMembers = members.length > 0 ? members : scheduleMembers;
 
   const safeScheduleMatches = useMemo(() => {
     const safeMatches = scheduleMatches.filter((m) =>
@@ -681,7 +683,7 @@ export const LeagueDashboard = () => {
                       <ChevronLeft className="w-5 h-5" />
                     </button>
 
-                    <div className="flex-1 flex gap-2 overflow-x-auto pb-1">
+                    <div className="flex-1 grid grid-cols-7 gap-2">
                       {scheduleWeekDays.map((date) => {
                         const dateKey = getLocalDateKey(date);
                         const isSelected = selectedScheduleDate === dateKey;
@@ -691,7 +693,7 @@ export const LeagueDashboard = () => {
                             key={dateKey}
                             onClick={() => setSelectedScheduleDate(dateKey)}
                             className={twMerge(
-                              'w-16 py-2 rounded-full font-bold text-sm transition-colors border flex flex-col items-center',
+                              'w-full py-2 rounded-full font-bold text-sm transition-colors border flex flex-col items-center justify-center',
                               isSelected
                                 ? 'bg-emerald-500 border-emerald-500 text-neutral-950'
                                 : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700',
@@ -800,17 +802,39 @@ export const LeagueDashboard = () => {
 
           {activeTab === 'roster' && (
             <div className="space-y-6">
-              <div className="text-sm text-neutral-400 flex items-center gap-2">
-                <Clock className="w-4 h-4" /> Times shown in <span className="text-emerald-500 font-medium">{localTimeZone}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-neutral-300 uppercase tracking-wider">Viewing Team:</span>
+                  <div className="relative">
+                    <select
+                      value={selectedPlayerId}
+                      onChange={(e) => setSelectedPlayerId(e.target.value)}
+                      className="appearance-none bg-neutral-900 border border-emerald-500/60 rounded-lg pl-4 pr-10 py-2 font-bold text-neutral-50 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors cursor-pointer"
+                    >
+                      {rosterMembers.map((member) => (
+                        <option key={member.user_id} value={member.user_id}>
+                          {member.user_id === currentUserId
+                            ? `${member.username}'s Roster (You)`
+                            : `${member.username}'s Roster`}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="text-sm text-neutral-400 flex items-center gap-2">
+                  <Clock className="w-4 h-4" /> Times shown in <span className="text-emerald-500 font-medium">{localTimeZone}</span>
+                </div>
               </div>
 
               {safeScheduleMatches.length === 0 ? (
                 <p className="text-neutral-500 italic text-center py-12">No matches scheduled yet</p>
-              ) : currentUserTeams.length === 0 ? (
+              ) : rosterTeams.length === 0 ? (
                 <p className="text-neutral-500 italic text-center py-12">No drafted teams found.</p>
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {currentUserTeams.map(({ team, matches: teamMatches }) => (
+                  {rosterTeams.map(({ team, matches: teamMatches }) => (
                     <div key={team.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex flex-col">
                       <div className="p-4 border-b border-neutral-800 bg-neutral-950">
                         <div className="flex items-center gap-3">
