@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { fetchMatchesFromApi, loadMatchesFromDb } from '../lib/matchesService';
 import { supabase } from '../lib/supabase';
 import type { DraftPick, LeagueMember, Match } from '../types/index';
-
-const GET_MATCHES_URL = 'https://nhgewlppofncqepkkcsw.supabase.co/functions/v1/get-matches';
 
 type DraftPickRow = {
   team_code: string;
@@ -21,18 +20,6 @@ type LeagueMemberRow = {
     color: string;
     icon: string;
   } | null;
-};
-
-type MatchRow = {
-  id: string;
-  match_id: string;
-  home_team: string;
-  away_team: string;
-  home_score: number | null;
-  away_score: number | null;
-  status: string;
-  match_date: string;
-  round: string;
 };
 
 function toLeagueMember(row: LeagueMemberRow): LeagueMember {
@@ -56,17 +43,44 @@ function toDraftPick(row: DraftPickRow): DraftPick {
   };
 }
 
-function toMatch(row: MatchRow): Match {
+async function loadLeagueScheduleData(leagueId: string) {
+  const [matches, picksResult, membersResult] = await Promise.all([
+    loadMatchesFromDb(),
+    supabase
+      .from('draft_picks')
+      .select('team_code, user_id, pick_number')
+      .eq('league_id', leagueId)
+      .order('pick_number', { ascending: true }),
+    supabase
+      .from('league_members')
+      .select(`
+        id,
+        league_id,
+        user_id,
+        draft_position,
+        total_points,
+        profiles (
+          username,
+          color,
+          icon
+        )
+      `)
+      .eq('league_id', leagueId)
+      .order('draft_position', { ascending: true }),
+  ]);
+
+  if (picksResult.error) {
+    throw new Error(`Failed to fetch draft picks: ${picksResult.error.message}`);
+  }
+
+  if (membersResult.error) {
+    throw new Error(`Failed to fetch league members: ${membersResult.error.message}`);
+  }
+
   return {
-    id: row.id,
-    match_id: row.match_id,
-    home_team: row.home_team,
-    away_team: row.away_team,
-    home_score: row.home_score,
-    away_score: row.away_score,
-    status: row.status as Match['status'],
-    match_date: row.match_date,
-    round: row.round,
+    matches,
+    picks: (picksResult.data ?? []).map((row) => toDraftPick(row as DraftPickRow)),
+    members: (membersResult.data ?? []).map((row) => toLeagueMember(row as LeagueMemberRow)),
   };
 }
 
@@ -77,97 +91,29 @@ export function useSchedule(leagueId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshMatches = useCallback(async () => {
     if (!leagueId) return;
 
-    let isMounted = true;
+    setLoading(true);
+    setError(null);
 
-    const loadSchedule = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-
-        console.log('Calling Edge Function with session:', session?.access_token ? 'has token' : 'no token');
-
-        const edgeResponse = await fetch(GET_MATCHES_URL, {
-          headers: { Authorization: `Bearer ${session?.access_token}` },
-        });
-
-        console.log('Edge Function response status:', edgeResponse.status);
-        if (!edgeResponse.ok) {
-          const errorBody = await edgeResponse.text();
-          console.error('Edge Function error:', errorBody);
-          throw new Error(`Failed to fetch matches: ${edgeResponse.status} ${errorBody}`);
-        }
-
-        const [matchesResult, picksResult, membersResult] = await Promise.all([
-          supabase
-            .from('matches')
-            .select('id, match_id, home_team, away_team, home_score, away_score, status, match_date, round')
-            .order('match_date', { ascending: true }),
-          supabase
-            .from('draft_picks')
-            .select('team_code, user_id, pick_number')
-            .eq('league_id', leagueId)
-            .order('pick_number', { ascending: true }),
-          supabase
-            .from('league_members')
-            .select(`
-              id,
-              league_id,
-              user_id,
-              draft_position,
-              total_points,
-              profiles (
-                username,
-                color,
-                icon
-              )
-            `)
-            .eq('league_id', leagueId)
-            .order('draft_position', { ascending: true }),
-        ]);
-
-        if (matchesResult.error) {
-          throw new Error(`Failed to fetch matches: ${matchesResult.error.message}`);
-        }
-
-        if (picksResult.error) {
-          throw new Error(`Failed to fetch draft picks: ${picksResult.error.message}`);
-        }
-
-        if (membersResult.error) {
-          throw new Error(`Failed to fetch league members: ${membersResult.error.message}`);
-        }
-
-        console.log('Schedule loaded - matches:', matchesResult.data?.length,
-          'picks:', picksResult.data?.length,
-          'members:', membersResult.data?.length);
-
-        if (!isMounted) return;
-
-        setMatches((matchesResult.data ?? []).map((row) => toMatch(row as MatchRow)));
-        setPicks((picksResult.data ?? []).map((row) => toDraftPick(row as DraftPickRow)));
-        setMembers((membersResult.data ?? []).map((row) => toLeagueMember(row as LeagueMemberRow)));
-      } catch (err) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load schedule');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadSchedule();
-
-    return () => {
-      isMounted = false;
-    };
+    try {
+      await fetchMatchesFromApi();
+      const data = await loadLeagueScheduleData(leagueId);
+      setMatches(data.matches);
+      setPicks(data.picks);
+      setMembers(data.members);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load schedule');
+    } finally {
+      setLoading(false);
+    }
   }, [leagueId]);
+
+  useEffect(() => {
+    if (!leagueId) return;
+    refreshMatches();
+  }, [leagueId, refreshMatches]);
 
   return {
     matches,
@@ -175,5 +121,6 @@ export function useSchedule(leagueId: string) {
     members,
     loading,
     error,
+    refreshMatches,
   };
 }

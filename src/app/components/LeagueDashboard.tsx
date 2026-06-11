@@ -3,83 +3,38 @@ import { useParams, useNavigate } from 'react-router';
 import { TEAMS } from '../store';
 import { fetchLeague } from '../../hooks/useLeague';
 import { useSchedule } from '../../hooks/useSchedule';
-import { calculatePoints } from '../../lib/pointsService';
+import { calculatePoints, calculateTeamPoints, updateLeagueMemberPoints } from '../../lib/pointsService';
+import { normalizeTeamCode, toFlagCode } from '../../lib/teamCodes';
 import { supabase } from '../../lib/supabase';
 import type { DraftPick, League, LeagueMember, Match } from '../../types/index';
 import { Trophy, Calendar, Clock, Star, Medal, TrendingUp, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
-
-type DraftPickRow = {
-  user_id: string;
-  team_code: string;
-  pick_number: number;
-};
-
-type MatchRow = {
-  id: string;
-  match_id: string;
-  home_team: string;
-  away_team: string;
-  home_score: number | null;
-  away_score: number | null;
-  status: 'scheduled' | 'live' | 'finished';
-  match_date: string;
-  round: string;
-};
-
-function toDraftPick(row: DraftPickRow): DraftPick {
-  return {
-    teamId: row.team_code,
-    playerId: row.user_id,
-    pickNumber: row.pick_number,
-  };
-}
-
-function toMatch(row: MatchRow): Match {
-  return {
-    id: row.id,
-    match_id: row.match_id,
-    home_team: row.home_team,
-    away_team: row.away_team,
-    home_score: row.home_score,
-    away_score: row.away_score,
-    status: row.status,
-    match_date: row.match_date,
-    round: row.round,
-  };
-}
-
-function getTeamPoints(teamId: string, finishedMatches: Match[]): number {
-  let pts = 0;
-
-  for (const match of finishedMatches) {
-    if (match.status !== 'finished' || match.home_score === null || match.away_score === null) {
-      continue;
-    }
-
-    const isHome = match.home_team === teamId;
-    const isAway = match.away_team === teamId;
-    if (!isHome && !isAway) continue;
-
-    if (match.home_score === match.away_score) {
-      pts += 1;
-    } else if (isHome && match.home_score > match.away_score) {
-      pts += 3;
-    } else if (isAway && match.away_score > match.home_score) {
-      pts += 3;
-    }
-  }
-
-  return pts;
-}
 
 function findMemberForTeam(
   teamCode: string,
   picks: DraftPick[],
   members: LeagueMember[],
 ): LeagueMember | undefined {
-  const pick = picks.find((p) => p.teamId === teamCode);
+  const normalized = normalizeTeamCode(teamCode);
+  const pick = picks.find((p) => normalizeTeamCode(p.teamId) === normalized);
   return pick ? members.find((m) => m.user_id === pick.playerId) : undefined;
+}
+
+function matchesRoundLabel(round: string, label: string): boolean {
+  if (round === label) return true;
+  const normalized = round.toUpperCase().replace(/_/g, ' ');
+  const target = label.toUpperCase();
+  if (target.includes('16')) {
+    return normalized.includes('LAST 16') || normalized.includes('ROUND OF 16');
+  }
+  if (target.includes('32')) {
+    return normalized.includes('LAST 32') || normalized.includes('ROUND OF 32');
+  }
+  return false;
+}
+
+function isFinalRound(round: string): boolean {
+  return round.toUpperCase() === 'FINAL';
 }
 
 function getInitialScheduleDateKey() {
@@ -103,13 +58,13 @@ function findCinderellaWinner(
   picks: DraftPick[],
   members: LeagueMember[],
 ): { team: (typeof TEAMS)[number]; member: LeagueMember } | null {
-  const roundMatches = allMatches.filter((m) => m.round === round);
+  const roundMatches = allMatches.filter((m) => matchesRoundLabel(m.round, round));
   if (roundMatches.length === 0) return null;
 
   const teamCodes = new Set<string>();
   for (const m of roundMatches) {
-    teamCodes.add(m.home_team);
-    teamCodes.add(m.away_team);
+    teamCodes.add(normalizeTeamCode(m.home_team));
+    teamCodes.add(normalizeTeamCode(m.away_team));
   }
 
   let worstTeam: (typeof TEAMS)[number] | null = null;
@@ -129,21 +84,6 @@ function findCinderellaWinner(
   return { team: worstTeam, member };
 }
 
-const TLA_TO_TEAM: Record<string, string> = {
-  MEX: 'mx', RSA: 'za', KOR: 'kr', CZE: 'cz',
-  CAN: 'ca', BIH: 'ba', QAT: 'qa', SUI: 'ch',
-  BRA: 'br', MAR: 'ma', HAI: 'ht', SCO: 'gb-sct',
-  USA: 'us', PAR: 'py', AUS: 'au', TUR: 'tr',
-  GER: 'de', CUW: 'cw', CIV: 'ci', ECU: 'ec',
-  NED: 'nl', JPN: 'jp', SWE: 'se', TUN: 'tn',
-  BEL: 'be', EGY: 'eg', IRN: 'ir', NZL: 'nz',
-  ESP: 'es', CPV: 'cv', KSA: 'sa', URU: 'uy',
-  FRA: 'fr', SEN: 'sn', IRQ: 'iq', NOR: 'no',
-  ARG: 'ar', ALG: 'dz', AUT: 'at', JOR: 'jo',
-  POR: 'pt', COD: 'cd', UZB: 'uz', COL: 'co',
-  ENG: 'gb-eng', CRO: 'hr', GHA: 'gh', PAN: 'pa',
-};
-
 export const LeagueDashboard = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -159,10 +99,6 @@ export const LeagueDashboard = () => {
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<LeagueMember[]>([]);
-  const [picks, setPicks] = useState<DraftPick[]>([]);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [scheduledMatches, setScheduledMatches] = useState<Match[]>([]);
-  const [allMatches, setAllMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'standings' | 'roster' | 'schedule'>('standings');
@@ -191,36 +127,14 @@ export const LeagueDashboard = () => {
           throw new Error(`Failed to get current user: ${authError.message}`);
         }
 
-        const [leagueData, picksResult, matchesResult] = await Promise.all([
+        const [leagueData] = await Promise.all([
           fetchLeague(id),
-          supabase
-            .from('draft_picks')
-            .select('user_id, team_code, pick_number')
-            .eq('league_id', id)
-            .order('pick_number', { ascending: true }),
-          supabase
-            .from('matches')
-            .select('id, match_id, home_team, away_team, home_score, away_score, status, match_date, round'),
         ]);
-
-        if (picksResult.error) {
-          throw new Error(`Failed to fetch draft picks: ${picksResult.error.message}`);
-        }
-        if (matchesResult.error) {
-          throw new Error(`Failed to fetch matches: ${matchesResult.error.message}`);
-        }
 
         if (!isMounted) return;
 
-        const fetchedMatches = (matchesResult.data ?? []).map((row) => toMatch(row as MatchRow));
-        const finishedMatches = fetchedMatches.filter((m) => m.status === 'finished');
-
         setLeague(leagueData.league);
         setMembers(leagueData.members);
-        setPicks((picksResult.data ?? []).map((row) => toDraftPick(row as DraftPickRow)));
-        setMatches(finishedMatches);
-        setAllMatches(fetchedMatches);
-        setScheduledMatches(fetchedMatches.filter((m) => m.status === 'scheduled'));
         setCurrentUserId(user?.id ?? '');
         setSelectedPlayerId((prev) => prev || user?.id || leagueData.members[0]?.user_id || '');
       } catch (err) {
@@ -267,43 +181,60 @@ export const LeagueDashboard = () => {
     };
   }, [id]);
 
-  const pointsMap = useMemo(() => calculatePoints(picks, matches), [picks, matches]);
+  const rosterMembers = members.length > 0 ? members : scheduleMembers;
+  const finishedMatches = useMemo(
+    () => scheduleMatches.filter((m) => m.status === 'finished'),
+    [scheduleMatches],
+  );
+
+  const pointsMap = useMemo(
+    () => calculatePoints(schedulePicks, finishedMatches),
+    [schedulePicks, finishedMatches],
+  );
+
+  useEffect(() => {
+    if (!leagueId || scheduleLoading || schedulePicks.length === 0) return;
+
+    updateLeagueMemberPoints(leagueId, pointsMap).catch((err) => {
+      console.warn('Failed to persist league points:', err);
+    });
+  }, [leagueId, scheduleLoading, schedulePicks.length, pointsMap]);
 
   const playerStats = useMemo(() => {
-    return members
+    return rosterMembers
       .map((member) => {
-        const memberTeams = picks
+        const memberTeams = schedulePicks
           .filter((p) => p.playerId === member.user_id)
-          .map((p) => TEAMS.find((t) => t.id === p.teamId))
+          .map((p) => TEAMS.find((t) => t.id === normalizeTeamCode(p.teamId)))
           .filter(Boolean) as (typeof TEAMS)[number][];
 
         const totalPoints = pointsMap.get(member.user_id) ?? 0;
         return { player: member, teams: memberTeams, totalPoints };
       })
       .sort((a, b) => b.totalPoints - a.totalPoints);
-  }, [members, picks, pointsMap]);
+  }, [rosterMembers, schedulePicks, pointsMap]);
 
-  const hasFinishedMatches = matches.length > 0;
+  const hasFinishedMatches = finishedMatches.length > 0;
   const pointsLeader = playerStats[0];
 
-  const finalMatch = matches.find((m) => m.round === 'Final');
+  const finalMatch = scheduleMatches.find((m) => isFinalRound(m.round));
   let worldCupWinnerTeam: string | null = null;
   if (finalMatch && finalMatch.home_score !== null && finalMatch.away_score !== null) {
     if (finalMatch.home_score > finalMatch.away_score) {
-      worldCupWinnerTeam = finalMatch.home_team;
+      worldCupWinnerTeam = normalizeTeamCode(finalMatch.home_team);
     } else if (finalMatch.away_score > finalMatch.home_score) {
-      worldCupWinnerTeam = finalMatch.away_team;
+      worldCupWinnerTeam = normalizeTeamCode(finalMatch.away_team);
     }
   }
   const worldCupWinnerMember = worldCupWinnerTeam
-    ? findMemberForTeam(worldCupWinnerTeam, picks, members)
+    ? findMemberForTeam(worldCupWinnerTeam, schedulePicks, rosterMembers)
     : undefined;
   const worldCupWinnerTeamInfo = worldCupWinnerTeam
     ? TEAMS.find((t) => t.id === worldCupWinnerTeam)
     : undefined;
 
-  const cinderellaR32 = findCinderellaWinner('Round of 32', allMatches, picks, members);
-  const cinderellaR16 = findCinderellaWinner('Round of 16', allMatches, picks, members);
+  const cinderellaR32 = findCinderellaWinner('Round of 32', scheduleMatches, schedulePicks, rosterMembers);
+  const cinderellaR16 = findCinderellaWinner('Round of 16', scheduleMatches, schedulePicks, rosterMembers);
 
   const selectedPlayerStats = playerStats.find((p) => p.player.user_id === selectedPlayerId);
 
@@ -321,18 +252,14 @@ export const LeagueDashboard = () => {
     const playerPicks = schedulePicks.filter((p) => p.playerId === selectedPlayerId);
     return playerPicks
       .map((pick) => {
-        const team = TEAMS.find((t) => t.id === pick.teamId);
+        const team = TEAMS.find((t) => t.id === normalizeTeamCode(pick.teamId));
         if (!team) return null;
 
         const teamMatches = safeMatches
           .filter((m) => {
-            try {
-              const homeFlagCode = TLA_TO_TEAM[m.home_team] ?? m.home_team.toLowerCase();
-              const awayFlagCode = TLA_TO_TEAM[m.away_team] ?? m.away_team.toLowerCase();
-              return homeFlagCode === team.id || awayFlagCode === team.id;
-            } catch {
-              return false;
-            }
+            const homeCode = normalizeTeamCode(m.home_team);
+            const awayCode = normalizeTeamCode(m.away_team);
+            return homeCode === team.id || awayCode === team.id;
           })
           .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime());
 
@@ -340,8 +267,6 @@ export const LeagueDashboard = () => {
       })
       .filter(Boolean) as { team: (typeof TEAMS)[number]; matches: Match[] }[];
   }, [schedulePicks, scheduleMatches, selectedPlayerId]);
-
-  const rosterMembers = members.length > 0 ? members : scheduleMembers;
 
   const safeScheduleMatches = useMemo(() => {
     const safeMatches = scheduleMatches.filter((m) =>
@@ -409,7 +334,7 @@ export const LeagueDashboard = () => {
     };
   };
 
-  if (loading) {
+  if (loading || scheduleLoading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
@@ -627,7 +552,7 @@ export const LeagueDashboard = () => {
                               {stat.teams.map(t => (
                                 <span key={t.id} className="text-xs bg-neutral-950 border border-neutral-800 px-2 py-1 rounded flex items-center gap-1.5">
                                   <img src={`https://flagcdn.com/w20/${t.flagCode}.png`} alt="" className="w-3 h-2.5 object-cover rounded-sm" />
-                                  {t.name} <span className="text-emerald-500 font-bold">{getTeamPoints(t.id, matches)}</span>
+                                  {t.name} <span className="text-emerald-500 font-bold">{calculateTeamPoints(t.id, finishedMatches)}</span>
                                 </span>
                               ))}
                             </div>
@@ -726,12 +651,8 @@ export const LeagueDashboard = () => {
                           let homeFlagCode = '';
                           let awayFlagCode = '';
 
-                          try {
-                            homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
-                            awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
-                          } catch {
-                            return null;
-                          }
+                          homeFlagCode = toFlagCode(match.home_team);
+                          awayFlagCode = toFlagCode(match.away_team);
 
                           if (!homeFlagCode || !awayFlagCode) {
                             return null;
@@ -853,12 +774,8 @@ export const LeagueDashboard = () => {
                             let homeFlagCode = '';
                             let awayFlagCode = '';
 
-                            try {
-                              homeFlagCode = TLA_TO_TEAM[match.home_team] ?? match.home_team.toLowerCase();
-                              awayFlagCode = TLA_TO_TEAM[match.away_team] ?? match.away_team.toLowerCase();
-                            } catch {
-                              return null;
-                            }
+                            homeFlagCode = toFlagCode(match.home_team);
+                            awayFlagCode = toFlagCode(match.away_team);
 
                             if (!homeFlagCode || !awayFlagCode) {
                               return null;

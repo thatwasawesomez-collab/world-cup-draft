@@ -1,16 +1,38 @@
 import { supabase } from './supabase';
+import { normalizeTeamCode } from './teamCodes';
 import type { DraftPick, Match } from '../types/index';
+
+function isGroupStage(round: string): boolean {
+  const r = round.toUpperCase();
+  return r.includes('GROUP') || r === 'GROUP_STAGE';
+}
+
+function pointsForResult(isWin: boolean, isDraw: boolean, round: string): number {
+  if (isDraw) {
+    return isGroupStage(round) ? 1 : 0;
+  }
+  if (isWin) {
+    return 2;
+  }
+  return 0;
+}
+
+function lookupUserForTeam(teamCode: string, teamToUser: Map<string, string>): string | undefined {
+  const normalized = normalizeTeamCode(teamCode);
+  return teamToUser.get(normalized) ?? teamToUser.get(teamCode);
+}
 
 /**
  * Calculates total points per user from finished matches and draft picks.
- * Win = 3pts, draw = 1pt per team, loss = 0pts.
+ * Group Stage: win = 2pts, tie = 1pt. Bracket: win = 2pts.
  */
 export function calculatePoints(picks: DraftPick[], matches: Match[]): Map<string, number> {
   const pointsMap = new Map<string, number>();
   const teamToUser = new Map<string, string>();
 
   for (const pick of picks) {
-    teamToUser.set(pick.teamId, pick.playerId);
+    const teamId = normalizeTeamCode(pick.teamId);
+    teamToUser.set(teamId, pick.playerId);
     if (!pointsMap.has(pick.playerId)) {
       pointsMap.set(pick.playerId, 0);
     }
@@ -25,28 +47,65 @@ export function calculatePoints(picks: DraftPick[], matches: Match[]): Map<strin
       continue;
     }
 
-    const homeUser = teamToUser.get(match.home_team);
-    const awayUser = teamToUser.get(match.away_team);
+    const homeUser = lookupUserForTeam(match.home_team, teamToUser);
+    const awayUser = lookupUserForTeam(match.away_team, teamToUser);
+    const isDraw = match.home_score === match.away_score;
 
-    if (match.home_score > match.away_score) {
+    if (isDraw) {
+      const drawPts = pointsForResult(false, true, match.round);
       if (homeUser) {
-        pointsMap.set(homeUser, (pointsMap.get(homeUser) ?? 0) + 3);
-      }
-    } else if (match.away_score > match.home_score) {
-      if (awayUser) {
-        pointsMap.set(awayUser, (pointsMap.get(awayUser) ?? 0) + 3);
-      }
-    } else {
-      if (homeUser) {
-        pointsMap.set(homeUser, (pointsMap.get(homeUser) ?? 0) + 1);
+        pointsMap.set(homeUser, (pointsMap.get(homeUser) ?? 0) + drawPts);
       }
       if (awayUser) {
-        pointsMap.set(awayUser, (pointsMap.get(awayUser) ?? 0) + 1);
+        pointsMap.set(awayUser, (pointsMap.get(awayUser) ?? 0) + drawPts);
       }
+      continue;
+    }
+
+    const homeWin = match.home_score > match.away_score;
+    const homePts = pointsForResult(homeWin, false, match.round);
+    const awayPts = pointsForResult(!homeWin, false, match.round);
+
+    if (homeUser) {
+      pointsMap.set(homeUser, (pointsMap.get(homeUser) ?? 0) + homePts);
+    }
+    if (awayUser) {
+      pointsMap.set(awayUser, (pointsMap.get(awayUser) ?? 0) + awayPts);
     }
   }
 
   return pointsMap;
+}
+
+/** Points earned by a single team across finished matches. */
+export function calculateTeamPoints(teamId: string, matches: Match[]): number {
+  const normalizedId = normalizeTeamCode(teamId);
+  let pts = 0;
+
+  for (const match of matches) {
+    if (match.status !== 'finished' || match.home_score === null || match.away_score === null) {
+      continue;
+    }
+
+    const home = normalizeTeamCode(match.home_team);
+    const away = normalizeTeamCode(match.away_team);
+    const isHome = home === normalizedId;
+    const isAway = away === normalizedId;
+    if (!isHome && !isAway) {
+      continue;
+    }
+
+    const isDraw = match.home_score === match.away_score;
+    if (isDraw) {
+      pts += pointsForResult(false, true, match.round);
+    } else if (isHome) {
+      pts += pointsForResult(match.home_score > match.away_score, false, match.round);
+    } else {
+      pts += pointsForResult(match.away_score > match.home_score, false, match.round);
+    }
+  }
+
+  return pts;
 }
 
 /**
@@ -56,17 +115,14 @@ export async function updateLeagueMemberPoints(
   leagueId: string,
   pointsMap: Map<string, number>,
 ): Promise<void> {
-  const updates = Array.from(pointsMap.entries()).map(async ([userId, totalPoints]) => {
-    const { error } = await supabase
-      .from('league_members')
-      .update({ total_points: totalPoints })
-      .eq('league_id', leagueId)
-      .eq('user_id', userId);
+  const pPoints = Object.fromEntries(pointsMap.entries());
 
-    if (error) {
-      throw new Error(`Failed to update points for user ${userId}: ${error.message}`);
-    }
+  const { error } = await supabase.rpc('sync_league_member_points', {
+    p_league_id: leagueId,
+    p_points: pPoints,
   });
 
-  await Promise.all(updates);
+  if (error) {
+    throw new Error(`Failed to sync league points: ${error.message}`);
+  }
 }

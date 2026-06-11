@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { tlaToTeamCode } from '../_shared/teamCodes.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,8 +41,8 @@ function mapStatus(status: string): Match['status'] {
 function mapMatch(match: FootballDataMatch): Match {
   return {
     match_id: match.id.toString(),
-    home_team: match.homeTeam.tla,
-    away_team: match.awayTeam.tla,
+    home_team: tlaToTeamCode(match.homeTeam.tla),
+    away_team: tlaToTeamCode(match.awayTeam.tla),
     home_score: match.score.fullTime.home,
     away_score: match.score.fullTime.away,
     status: mapStatus(match.status),
