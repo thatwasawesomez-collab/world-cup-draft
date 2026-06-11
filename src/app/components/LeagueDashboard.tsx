@@ -5,6 +5,7 @@ import { fetchLeague } from '../../hooks/useLeague';
 import { useSchedule } from '../../hooks/useSchedule';
 import { calculatePoints, calculateTeamPoints, updateLeagueMemberPoints } from '../../lib/pointsService';
 import { normalizeTeamCode, toFlagCode } from '../../lib/teamCodes';
+import { userInitial } from '../../lib/strings';
 import { supabase } from '../../lib/supabase';
 import type { DraftPick, League, LeagueMember, Match } from '../../types/index';
 import { Trophy, Calendar, Clock, Star, Medal, TrendingUp, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
@@ -21,8 +22,8 @@ function findMemberForTeam(
   return pick ? members.find((m) => m.user_id === pick.playerId) : undefined;
 }
 
-function matchesRoundLabel(round: string | null | undefined, label: string): boolean {
-  if (!round) return false;
+function matchesRoundLabel(round: unknown, label: string): boolean {
+  if (typeof round !== 'string' || !round) return false;
   if (round === label) return true;
   const normalized = round.toUpperCase().replace(/_/g, ' ');
   const target = label.toUpperCase();
@@ -35,8 +36,8 @@ function matchesRoundLabel(round: string | null | undefined, label: string): boo
   return false;
 }
 
-function isFinalRound(round: string | null | undefined): boolean {
-  if (!round) return false;
+function isFinalRound(round: unknown): boolean {
+  if (typeof round !== 'string' || !round) return false;
   return round.toUpperCase() === 'FINAL';
 }
 
@@ -61,7 +62,9 @@ function findCinderellaWinner(
   picks: DraftPick[],
   members: LeagueMember[],
 ): { team: (typeof TEAMS)[number]; member: LeagueMember } | null {
-  const roundMatches = allMatches.filter((m) => matchesRoundLabel(m.round, round));
+  const roundMatches = allMatches.filter(
+    (m) => m.home_team && m.away_team && matchesRoundLabel(m.round, round),
+  );
   if (roundMatches.length === 0) return null;
 
   const teamCodes = new Set<string>();
@@ -422,7 +425,7 @@ export const LeagueDashboard = () => {
                     {hasFinishedMatches && pointsLeader ? (
                       <div className="flex items-center justify-center gap-2">
                         <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", pointsLeader.player.color)}>
-                          {pointsLeader.player.username.charAt(0).toUpperCase()}
+                          {userInitial(pointsLeader.player.username)}
                         </div>
                         <span className="font-bold text-lg">{pointsLeader.player.username}</span>
                         <span className="text-emerald-500 font-bold ml-2">{pointsLeader.totalPoints} pts</span>
@@ -446,7 +449,7 @@ export const LeagueDashboard = () => {
                       <div className="flex flex-col items-center gap-1">
                         <div className="flex items-center justify-center gap-2">
                           <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", worldCupWinnerMember.color)}>
-                            {worldCupWinnerMember.username.charAt(0).toUpperCase()}
+                            {userInitial(worldCupWinnerMember.username)}
                           </div>
                           <span className="font-bold text-lg">{worldCupWinnerMember.username}</span>
                         </div>
@@ -475,7 +478,7 @@ export const LeagueDashboard = () => {
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center justify-center gap-2">
                             <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR32.member.color)}>
-                              {cinderellaR32.member.username.charAt(0).toUpperCase()}
+                              {userInitial(cinderellaR32.member.username)}
                             </div>
                             <span className="font-bold">{cinderellaR32.member.username}</span>
                           </div>
@@ -494,7 +497,7 @@ export const LeagueDashboard = () => {
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center justify-center gap-2">
                             <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR16.member.color)}>
-                              {cinderellaR16.member.username.charAt(0).toUpperCase()}
+                              {userInitial(cinderellaR16.member.username)}
                             </div>
                             <span className="font-bold">{cinderellaR16.member.username}</span>
                           </div>
@@ -545,7 +548,7 @@ export const LeagueDashboard = () => {
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className={twMerge("w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold", stat.player.color)}>
-                                {stat.player.username.charAt(0).toUpperCase()}
+                                {userInitial(stat.player.username)}
                               </div>
                               <span className="font-bold">{stat.player.username}</span>
                             </div>
@@ -681,7 +684,7 @@ export const LeagueDashboard = () => {
                                     'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
                                     homeOwner.color,
                                   )}>
-                                    {homeOwner.username.charAt(0)}
+                                    {userInitial(homeOwner.username)}
                                   </div>
                                 )}
                               </div>
@@ -707,7 +710,7 @@ export const LeagueDashboard = () => {
                                     'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
                                     awayOwner.color,
                                   )}>
-                                    {awayOwner.username.charAt(0)}
+                                    {userInitial(awayOwner.username)}
                                   </div>
                                 )}
                                 <span className="font-semibold">{awayTeam?.name ?? match.away_team}</span>
