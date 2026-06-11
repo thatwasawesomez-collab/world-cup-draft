@@ -11,16 +11,18 @@ import { Trophy, Calendar, Clock, Star, Medal, TrendingUp, Loader2, ChevronLeft,
 import { twMerge } from 'tailwind-merge';
 
 function findMemberForTeam(
-  teamCode: string,
+  teamCode: string | null | undefined,
   picks: DraftPick[],
   members: LeagueMember[],
 ): LeagueMember | undefined {
   const normalized = normalizeTeamCode(teamCode);
+  if (!normalized) return undefined;
   const pick = picks.find((p) => normalizeTeamCode(p.teamId) === normalized);
   return pick ? members.find((m) => m.user_id === pick.playerId) : undefined;
 }
 
-function matchesRoundLabel(round: string, label: string): boolean {
+function matchesRoundLabel(round: string | null | undefined, label: string): boolean {
+  if (!round) return false;
   if (round === label) return true;
   const normalized = round.toUpperCase().replace(/_/g, ' ');
   const target = label.toUpperCase();
@@ -33,7 +35,8 @@ function matchesRoundLabel(round: string, label: string): boolean {
   return false;
 }
 
-function isFinalRound(round: string): boolean {
+function isFinalRound(round: string | null | undefined): boolean {
+  if (!round) return false;
   return round.toUpperCase() === 'FINAL';
 }
 

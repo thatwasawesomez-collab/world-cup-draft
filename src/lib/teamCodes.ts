@@ -15,12 +15,13 @@ export const TLA_TO_TEAM: Record<string, string> = {
 };
 
 /** Normalize a TLA or internal team id to the canonical `team_code`. */
-export function normalizeTeamCode(code: string): string {
+export function normalizeTeamCode(code: string | null | undefined): string {
+  if (!code) return '';
   const upper = code.toUpperCase();
   return TLA_TO_TEAM[upper] ?? code.toLowerCase();
 }
 
 /** Flag CDN code for display (same as internal id after normalization). */
-export function toFlagCode(teamCode: string): string {
+export function toFlagCode(teamCode: string | null | undefined): string {
   return normalizeTeamCode(teamCode);
 }

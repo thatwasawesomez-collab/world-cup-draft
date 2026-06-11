@@ -2,7 +2,8 @@ import { supabase } from './supabase';
 import { normalizeTeamCode } from './teamCodes';
 import type { DraftPick, Match } from '../types/index';
 
-function isGroupStage(round: string): boolean {
+function isGroupStage(round: string | null | undefined): boolean {
+  if (!round) return false;
   const r = round.toUpperCase();
   return r.includes('GROUP') || r === 'GROUP_STAGE';
 }
@@ -17,7 +18,11 @@ function pointsForResult(isWin: boolean, isDraw: boolean, round: string): number
   return 0;
 }
 
-function lookupUserForTeam(teamCode: string, teamToUser: Map<string, string>): string | undefined {
+function lookupUserForTeam(
+  teamCode: string | null | undefined,
+  teamToUser: Map<string, string>,
+): string | undefined {
+  if (!teamCode) return undefined;
   const normalized = normalizeTeamCode(teamCode);
   return teamToUser.get(normalized) ?? teamToUser.get(teamCode);
 }
