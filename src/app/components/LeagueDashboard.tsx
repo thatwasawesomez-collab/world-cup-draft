@@ -701,13 +701,6 @@ export const LeagueDashboard = () => {
                 </div>
               )}
 
-              {hasLiveMatches && (
-                <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
-                  Live matches in progress — scores update automatically.
-                </div>
-              )}
-
               {scheduleLoading ? (
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
