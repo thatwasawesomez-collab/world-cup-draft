@@ -1,3 +1,4 @@
+import { getProfile } from '../lib/profileUtils';
 import { supabase } from '../lib/supabase';
 import type { DraftType, League, LeagueMember } from '../types/index';
 
@@ -32,20 +33,25 @@ type LeagueMemberRow = {
   draft_position: number | null;
   total_points: number | null;
   profiles: {
-    username: string;
-    color: string;
-    icon: string;
-  } | null;
+    username: string | null;
+    color: string | null;
+    icon: string | null;
+  } | {
+    username: string | null;
+    color: string | null;
+    icon: string | null;
+  }[] | null;
 };
 
 function toLeagueMember(row: LeagueMemberRow): LeagueMember {
+  const profile = getProfile(row.profiles);
   return {
     id: row.id,
     league_id: row.league_id,
     user_id: row.user_id,
-    username: row.profiles?.username ?? '',
-    color: row.profiles?.color ?? '',
-    icon: row.profiles?.icon ?? '',
+    username: profile?.username ?? '',
+    color: profile?.color ?? '',
+    icon: profile?.icon ?? '',
     draft_position: row.draft_position ?? 0,
     total_points: row.total_points ?? 0,
   };

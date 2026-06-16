@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { createBrowserRouter, Navigate, Outlet, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, useLocation, useRouteError } from 'react-router';
 import { PENDING_LEAGUE_PATH_KEY } from './components/JoinLeague';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -45,6 +45,25 @@ function ProtectedRoute() {
   return <Outlet />;
 }
 
+function RouteError() {
+  const error = useRouteError();
+  const message = error instanceof Error ? error.message : 'Something went wrong';
+
+  return (
+    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <h1 className="text-xl font-bold text-neutral-100">Something went wrong</h1>
+      <p className="text-neutral-400 max-w-md">{message}</p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="px-4 py-2 rounded-lg bg-emerald-500 text-neutral-950 font-bold hover:bg-emerald-400 transition-colors"
+      >
+        Reload page
+      </button>
+    </div>
+  );
+}
+
 export const router = createBrowserRouter([
   { path: '/', Component: Home },
   {
@@ -54,7 +73,7 @@ export const router = createBrowserRouter([
       { index: true, Component: Lobby },
       { path: 'lottery', Component: Lottery },
       { path: 'draft', Component: DraftRoom },
-      { path: 'dashboard', Component: LeagueDashboard },
+      { path: 'dashboard', Component: LeagueDashboard, errorElement: <RouteError /> },
     ],
   },
 ]);

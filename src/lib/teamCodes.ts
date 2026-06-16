@@ -1,3 +1,5 @@
+import { TEAMS } from '../app/store';
+
 /** Football Data API three-letter codes → internal team ids (matches `teams.team_code`). */
 export const TLA_TO_TEAM: Record<string, string> = {
   MEX: 'mx', RSA: 'za', KOR: 'kr', CZE: 'cz',
@@ -7,11 +9,12 @@ export const TLA_TO_TEAM: Record<string, string> = {
   GER: 'de', CUW: 'cw', CIV: 'ci', ECU: 'ec',
   NED: 'nl', JPN: 'jp', SWE: 'se', TUN: 'tn',
   BEL: 'be', EGY: 'eg', IRN: 'ir', NZL: 'nz',
-  ESP: 'es', CPV: 'cv', KSA: 'sa', URU: 'uy',
+  ESP: 'es', CPV: 'cv', KSA: 'sa', URU: 'uy', URY: 'uy',
   FRA: 'fr', SEN: 'sn', IRQ: 'iq', NOR: 'no',
   ARG: 'ar', ALG: 'dz', AUT: 'at', JOR: 'jo',
   POR: 'pt', COD: 'cd', UZB: 'uz', COL: 'co',
   ENG: 'gb-eng', CRO: 'hr', GHA: 'gh', PAN: 'pa',
+  CUR: 'cw',
 };
 
 /** Normalize a TLA or internal team id to the canonical `team_code`. */
@@ -26,7 +29,10 @@ export function normalizeTeamCode(code: unknown): string {
   return TLA_TO_TEAM[upper] ?? trimmed.toLowerCase();
 }
 
-/** Flag CDN code for display (same as internal id after normalization). */
+/** Flag CDN code for display; uses TEAMS.flagCode when available. */
 export function toFlagCode(teamCode: unknown): string {
-  return normalizeTeamCode(teamCode);
+  const teamId = normalizeTeamCode(teamCode);
+  if (!teamId) return '';
+  const team = TEAMS.find((t) => t.id === teamId);
+  return team?.flagCode ?? teamId;
 }

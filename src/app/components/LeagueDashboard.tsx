@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { TEAMS } from '../store';
 import { fetchLeague } from '../../hooks/useLeague';
 import { useSchedule } from '../../hooks/useSchedule';
-import { calculatePoints, calculateTeamPoints, updateLeagueMemberPoints } from '../../lib/pointsService';
+import { calculatePoints, calculateTeamPoints, calculateMatchTeamPoints, updateLeagueMemberPoints } from '../../lib/pointsService';
 import { normalizeTeamCode, toFlagCode } from '../../lib/teamCodes';
 import { userInitial } from '../../lib/strings';
 import { supabase } from '../../lib/supabase';
@@ -90,6 +90,117 @@ function findCinderellaWinner(
   return { team: worstTeam, member };
 }
 
+function OwnerAvatar({ member }: { member?: LeagueMember }) {
+  return (
+    <div className="w-5 h-5 shrink-0 flex items-center justify-center">
+      {member ? (
+        <div
+          className={twMerge(
+            'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
+            member.color,
+          )}
+        >
+          {userInitial(member.username)}
+        </div>
+      ) : (
+        <div className="w-5 h-5" aria-hidden />
+      )}
+    </div>
+  );
+}
+
+function ScheduleTeamSide({
+  flagCode,
+  name,
+  owner,
+  teamPoints,
+  align,
+}: {
+  flagCode: string;
+  name: string;
+  owner?: LeagueMember;
+  teamPoints: number | null;
+  align: 'left' | 'right';
+}) {
+  const pointsLabel = teamPoints != null && teamPoints > 0
+    ? `+${teamPoints} pt${teamPoints === 1 ? '' : 's'}`
+    : null;
+
+  if (align === 'right') {
+    return (
+      <div className="flex items-center gap-2 min-w-0 justify-end">
+        <OwnerAvatar member={owner} />
+        <div className="min-w-0 flex-1 text-right">
+          <p className="truncate text-sm font-semibold leading-tight">{name}</p>
+          {pointsLabel && (
+            <p className="text-[10px] font-bold leading-tight mt-0.5 text-emerald-500">
+              {pointsLabel}
+            </p>
+          )}
+        </div>
+        <img
+          src={`https://flagcdn.com/w40/${flagCode}.png`}
+          alt=""
+          className="w-8 h-6 shrink-0 object-cover rounded-sm"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <img
+        src={`https://flagcdn.com/w40/${flagCode}.png`}
+        alt=""
+        className="w-8 h-6 shrink-0 object-cover rounded-sm"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold leading-tight">{name}</p>
+        {pointsLabel && (
+          <p className="text-[10px] font-bold leading-tight mt-0.5 text-emerald-500">
+            {pointsLabel}
+          </p>
+        )}
+      </div>
+      <OwnerAvatar member={owner} />
+    </div>
+  );
+}
+
+function ScheduleMatchCenter({
+  match,
+  isRivalry,
+  formatMatchTime,
+}: {
+  match: Match;
+  isRivalry: boolean;
+  formatMatchTime: (iso: string) => string;
+}) {
+  const hasScore = match.home_score !== null && match.away_score !== null;
+
+  return (
+    <div className="shrink-0 w-[4.75rem] sm:w-20 flex flex-col items-center justify-center gap-0.5 px-1">
+      {match.status === 'finished' && hasScore && (
+        <span className="font-bold text-sm tabular-nums">{match.home_score} - {match.away_score}</span>
+      )}
+      {match.status === 'live' && (
+        <>
+          {hasScore ? (
+            <span className="font-bold text-sm tabular-nums text-white">{match.home_score} - {match.away_score}</span>
+          ) : null}
+          <span className="text-red-500 font-bold text-[10px] uppercase tracking-wide animate-pulse">Live</span>
+        </>
+      )}
+      {match.status === 'scheduled' && (
+        <span className="text-neutral-400 text-xs sm:text-sm">{formatMatchTime(match.match_date)}</span>
+      )}
+      {isRivalry && (
+        <span className="text-[10px] text-emerald-500 leading-none">Rivalry</span>
+      )}
+    </div>
+  );
+}
+
 export const LeagueDashboard = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -101,6 +212,8 @@ export const LeagueDashboard = () => {
     members: scheduleMembers,
     loading: scheduleLoading,
     error: scheduleError,
+    hasLiveMatches,
+    refreshMatches,
   } = useSchedule(leagueId);
 
   const [league, setLeague] = useState<League | null>(null);
@@ -117,6 +230,11 @@ export const LeagueDashboard = () => {
   const [countdownNow, setCountdownNow] = useState(Date.now());
 
   const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  useEffect(() => {
+    if (activeTab !== 'schedule' || !hasLiveMatches) return;
+    refreshMatches({ silent: true });
+  }, [activeTab, hasLiveMatches, refreshMatches]);
 
   useEffect(() => {
     if (!id) return;
@@ -583,6 +701,13 @@ export const LeagueDashboard = () => {
                 </div>
               )}
 
+              {hasLiveMatches && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                  Live matches in progress — scores update automatically.
+                </div>
+              )}
+
               {scheduleLoading ? (
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
@@ -654,11 +779,8 @@ export const LeagueDashboard = () => {
                     ) : (
                       <div>
                         {matchesOnSelectedDate.map((match) => {
-                          let homeFlagCode = '';
-                          let awayFlagCode = '';
-
-                          homeFlagCode = toFlagCode(match.home_team);
-                          awayFlagCode = toFlagCode(match.away_team);
+                          const homeFlagCode = toFlagCode(match.home_team);
+                          const awayFlagCode = toFlagCode(match.away_team);
 
                           if (!homeFlagCode || !awayFlagCode) {
                             return null;
@@ -673,49 +795,33 @@ export const LeagueDashboard = () => {
                             awayOwner &&
                             homeOwner.user_id !== awayOwner.user_id
                           );
+                          const homePoints = calculateMatchTeamPoints(match, homeFlagCode);
+                          const awayPoints = calculateMatchTeamPoints(match, awayFlagCode);
 
                           return (
-                            <div key={match.id} className="flex items-center justify-between px-4 py-3 border-b border-neutral-800/50">
-                              <div className="flex items-center gap-2 w-2/5">
-                                <img src={`https://flagcdn.com/w40/${homeFlagCode}.png`} alt="" className="w-8 h-6 object-cover rounded-sm" />
-                                <span className="font-semibold">{homeTeam?.name ?? match.home_team}</span>
-                                {homeOwner && (
-                                  <div className={twMerge(
-                                    'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
-                                    homeOwner.color,
-                                  )}>
-                                    {userInitial(homeOwner.username)}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="flex flex-col items-center w-1/5">
-                                {match.status === 'finished' && (
-                                  <span className="font-bold">{match.home_score} - {match.away_score}</span>
-                                )}
-                                {match.status === 'live' && (
-                                  <span className="text-red-500 font-bold animate-pulse">LIVE</span>
-                                )}
-                                {match.status === 'scheduled' && (
-                                  <span className="text-neutral-400 text-sm">{formatMatchTime(match.match_date)}</span>
-                                )}
-                                {isRivalry && (
-                                  <span className="text-[10px] text-emerald-500">Rivalry</span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2 w-2/5 justify-end">
-                                {awayOwner && (
-                                  <div className={twMerge(
-                                    'w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold',
-                                    awayOwner.color,
-                                  )}>
-                                    {userInitial(awayOwner.username)}
-                                  </div>
-                                )}
-                                <span className="font-semibold">{awayTeam?.name ?? match.away_team}</span>
-                                <img src={`https://flagcdn.com/w40/${awayFlagCode}.png`} alt="" className="w-8 h-6 object-cover rounded-sm" />
-                              </div>
+                            <div
+                              key={match.id}
+                              className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-x-1 sm:gap-x-2 items-center px-2 sm:px-4 py-3 border-b border-neutral-800/50"
+                            >
+                              <ScheduleTeamSide
+                                flagCode={homeFlagCode}
+                                name={homeTeam?.name ?? match.home_team}
+                                owner={homeOwner}
+                                teamPoints={homePoints}
+                                align="left"
+                              />
+                              <ScheduleMatchCenter
+                                match={match}
+                                isRivalry={isRivalry}
+                                formatMatchTime={formatMatchTime}
+                              />
+                              <ScheduleTeamSide
+                                flagCode={awayFlagCode}
+                                name={awayTeam?.name ?? match.away_team}
+                                owner={awayOwner}
+                                teamPoints={awayPoints}
+                                align="right"
+                              />
                             </div>
                           );
                         }).filter(Boolean)}

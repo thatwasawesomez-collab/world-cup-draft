@@ -13,7 +13,11 @@ type MatchRow = {
   round: string;
 };
 
-function toMatch(row: MatchRow): Match {
+function toMatch(row: MatchRow): Match | null {
+  if (!row.home_team || !row.away_team) {
+    return null;
+  }
+
   return {
     id: row.id,
     match_id: row.match_id,
@@ -23,7 +27,7 @@ function toMatch(row: MatchRow): Match {
     away_score: row.away_score,
     status: row.status as Match['status'],
     match_date: row.match_date,
-    round: row.round,
+    round: row.round ?? '',
   };
 }
 
@@ -61,5 +65,7 @@ export async function loadMatchesFromDb(): Promise<Match[]> {
     throw new Error(`Failed to load matches: ${error.message}`);
   }
 
-  return (data ?? []).map((row) => toMatch(row as MatchRow));
+  return (data ?? [])
+    .map((row) => toMatch(row as MatchRow))
+    .filter((match): match is Match => match !== null);
 }

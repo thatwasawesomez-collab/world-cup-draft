@@ -114,6 +114,34 @@ export function calculateTeamPoints(teamId: string, matches: Match[]): number {
   return pts;
 }
 
+/** Points for one team in a single finished match. Returns null if not applicable. */
+export function calculateMatchTeamPoints(match: Match, teamId: string): number | null {
+  if (match.status !== 'finished') {
+    return null;
+  }
+  if (match.home_score === null || match.away_score === null) {
+    return null;
+  }
+
+  const normalizedId = normalizeTeamCode(teamId);
+  const home = normalizeTeamCode(match.home_team);
+  const away = normalizeTeamCode(match.away_team);
+  const isHome = home === normalizedId;
+  const isAway = away === normalizedId;
+  if (!isHome && !isAway) {
+    return null;
+  }
+
+  const isDraw = match.home_score === match.away_score;
+  if (isDraw) {
+    return pointsForResult(false, true, match.round);
+  }
+  if (isHome) {
+    return pointsForResult(match.home_score > match.away_score, false, match.round);
+  }
+  return pointsForResult(match.away_score > match.home_score, false, match.round);
+}
+
 /**
  * Persists calculated points to league_members.total_points for a league.
  */
