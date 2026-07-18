@@ -61,6 +61,7 @@ function findCinderellaWinner(
   allMatches: Match[],
   picks: DraftPick[],
   members: LeagueMember[],
+  rankingByCode: Record<string, number> = {},
 ): { team: (typeof TEAMS)[number]; member: LeagueMember | undefined } | null {
   const roundMatches = allMatches.filter(
     (m) => m.home_team && m.away_team && matchesRoundLabel(m.round, round),
@@ -73,11 +74,14 @@ function findCinderellaWinner(
     teamCodes.add(normalizeTeamCode(m.away_team));
   }
 
+  const rankingOf = (team: (typeof TEAMS)[number]) =>
+    rankingByCode[team.id] ?? team.fifaRanking;
+
   let worstTeam: (typeof TEAMS)[number] | null = null;
   for (const code of teamCodes) {
     const team = TEAMS.find((t) => t.id === code);
     if (!team) continue;
-    if (!worstTeam || team.fifaRanking > worstTeam.fifaRanking) {
+    if (!worstTeam || rankingOf(team) > rankingOf(worstTeam)) {
       worstTeam = team;
     }
   }
@@ -85,7 +89,7 @@ function findCinderellaWinner(
   if (!worstTeam) return null;
 
   return {
-    team: worstTeam,
+    team: { ...worstTeam, fifaRanking: rankingOf(worstTeam) },
     member: findMemberForTeam(worstTeam.id, picks, members),
   };
 }
@@ -210,6 +214,7 @@ export const LeagueDashboard = () => {
     matches: scheduleMatches,
     picks: schedulePicks,
     members: scheduleMembers,
+    teamRankings,
     loading: scheduleLoading,
     error: scheduleError,
     hasLiveMatches,
@@ -357,8 +362,20 @@ export const LeagueDashboard = () => {
     ? TEAMS.find((t) => t.id === worldCupWinnerTeam)
     : undefined;
 
-  const cinderellaR32 = findCinderellaWinner('Round of 32', scheduleMatches, schedulePicks, rosterMembers);
-  const cinderellaR16 = findCinderellaWinner('Round of 16', scheduleMatches, schedulePicks, rosterMembers);
+  const cinderellaR32 = findCinderellaWinner(
+    'Round of 32',
+    scheduleMatches,
+    schedulePicks,
+    rosterMembers,
+    teamRankings,
+  );
+  const cinderellaR16 = findCinderellaWinner(
+    'Round of 16',
+    scheduleMatches,
+    schedulePicks,
+    rosterMembers,
+    teamRankings,
+  );
 
   const selectedPlayerStats = playerStats.find((p) => p.player.user_id === selectedPlayerId);
 

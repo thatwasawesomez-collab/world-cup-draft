@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchMatchesFromApi, loadMatchesFromDb } from '../lib/matchesService';
 import { getProfile } from '../lib/profileUtils';
+import { loadTeamRankings } from '../lib/teamsService';
 import { supabase } from '../lib/supabase';
 import type { DraftPick, LeagueMember, Match } from '../types/index';
 
@@ -52,7 +53,7 @@ function toDraftPick(row: DraftPickRow): DraftPick {
 }
 
 async function loadLeagueScheduleData(leagueId: string) {
-  const [matches, picksResult, membersResult] = await Promise.all([
+  const [matches, picksResult, membersResult, teamRankings] = await Promise.all([
     loadMatchesFromDb(),
     supabase
       .from('draft_picks')
@@ -75,6 +76,10 @@ async function loadLeagueScheduleData(leagueId: string) {
       `)
       .eq('league_id', leagueId)
       .order('draft_position', { ascending: true }),
+    loadTeamRankings().catch((err) => {
+      console.warn('Failed to load live team rankings, using static TEAMS:', err);
+      return {} as Record<string, number>;
+    }),
   ]);
 
   if (picksResult.error) {
@@ -89,6 +94,7 @@ async function loadLeagueScheduleData(leagueId: string) {
     matches,
     picks: (picksResult.data ?? []).map((row) => toDraftPick(row as DraftPickRow)),
     members: (membersResult.data ?? []).map((row) => toLeagueMember(row as LeagueMemberRow)),
+    teamRankings,
   };
 }
 
@@ -100,6 +106,7 @@ export function useSchedule(leagueId: string, options?: { pollWhenLive?: boolean
   const [matches, setMatches] = useState<Match[]>([]);
   const [picks, setPicks] = useState<DraftPick[]>([]);
   const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [teamRankings, setTeamRankings] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -126,6 +133,7 @@ export function useSchedule(leagueId: string, options?: { pollWhenLive?: boolean
       setMatches(data.matches);
       setPicks(data.picks);
       setMembers(data.members);
+      setTeamRankings(data.teamRankings);
     } catch (err) {
       if (!silent) {
         setError(err instanceof Error ? err.message : 'Failed to load schedule');
@@ -189,6 +197,7 @@ export function useSchedule(leagueId: string, options?: { pollWhenLive?: boolean
     matches,
     picks,
     members,
+    teamRankings,
     loading,
     error,
     hasLiveMatches,
