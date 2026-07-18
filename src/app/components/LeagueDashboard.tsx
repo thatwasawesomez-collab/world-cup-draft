@@ -61,7 +61,7 @@ function findCinderellaWinner(
   allMatches: Match[],
   picks: DraftPick[],
   members: LeagueMember[],
-): { team: (typeof TEAMS)[number]; member: LeagueMember } | null {
+): { team: (typeof TEAMS)[number]; member: LeagueMember | undefined } | null {
   const roundMatches = allMatches.filter(
     (m) => m.home_team && m.away_team && matchesRoundLabel(m.round, round),
   );
@@ -84,10 +84,10 @@ function findCinderellaWinner(
 
   if (!worstTeam) return null;
 
-  const member = findMemberForTeam(worstTeam.id, picks, members);
-  if (!member) return null;
-
-  return { team: worstTeam, member };
+  return {
+    team: worstTeam,
+    member: findMemberForTeam(worstTeam.id, picks, members),
+  };
 }
 
 function OwnerAvatar({ member }: { member?: LeagueMember }) {
@@ -594,12 +594,16 @@ export const LeagueDashboard = () => {
                       <span className="text-xs text-neutral-500 block mb-1">Round of 32 — 50%</span>
                       {cinderellaR32 ? (
                         <div className="flex flex-col items-center gap-1">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR32.member.color)}>
-                              {userInitial(cinderellaR32.member.username)}
+                          {cinderellaR32.member ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR32.member.color)}>
+                                {userInitial(cinderellaR32.member.username)}
+                              </div>
+                              <span className="font-bold">{cinderellaR32.member.username}</span>
                             </div>
-                            <span className="font-bold">{cinderellaR32.member.username}</span>
-                          </div>
+                          ) : (
+                            <span className="font-bold text-neutral-500">Undrafted</span>
+                          )}
                           <div className="flex items-center gap-1.5 text-xs text-neutral-400">
                             <img src={`https://flagcdn.com/w20/${cinderellaR32.team.flagCode}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" />
                             {cinderellaR32.team.name} (#{cinderellaR32.team.fifaRanking})
@@ -613,12 +617,16 @@ export const LeagueDashboard = () => {
                       <span className="text-xs text-neutral-500 block mb-1">Round of 16 — 50%</span>
                       {cinderellaR16 ? (
                         <div className="flex flex-col items-center gap-1">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR16.member.color)}>
-                              {userInitial(cinderellaR16.member.username)}
+                          {cinderellaR16.member ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <div className={twMerge("w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold", cinderellaR16.member.color)}>
+                                {userInitial(cinderellaR16.member.username)}
+                              </div>
+                              <span className="font-bold">{cinderellaR16.member.username}</span>
                             </div>
-                            <span className="font-bold">{cinderellaR16.member.username}</span>
-                          </div>
+                          ) : (
+                            <span className="font-bold text-neutral-500">Undrafted</span>
+                          )}
                           <div className="flex items-center gap-1.5 text-xs text-neutral-400">
                             <img src={`https://flagcdn.com/w20/${cinderellaR16.team.flagCode}.png`} alt="" className="w-4 h-3 object-cover rounded-sm" />
                             {cinderellaR16.team.name} (#{cinderellaR16.team.fifaRanking})
