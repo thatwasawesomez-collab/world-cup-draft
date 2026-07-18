@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "seed": "node scripts/seedTeams.js"
+    "seed": "node scripts/seedTeams.js",
+    "sync:teams": "node scripts/syncTeamsFromSupabase.js"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
